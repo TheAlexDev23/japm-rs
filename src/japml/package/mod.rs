@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-pub mod parsing;
+pub mod searching;
 
 #[derive(Default, Debug, Deserialize, Clone)]
 pub struct Package {
@@ -27,3 +27,11 @@ pub struct RemoteFile {
     pub target_path: String,
 }
 
+impl Package {
+    pub fn from_json(json: &str) -> Result<Package, String> {
+        match serde_json::from_str(json) {
+            Ok(package) => Ok(package),
+            Err(error) => Err(format!("Error parsing json:\n{error}")),
+        }
+    }
+}

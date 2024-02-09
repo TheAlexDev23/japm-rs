@@ -41,7 +41,7 @@ impl Logger {
         }
     }
 
-    pub fn log(&self, msg: String, level: LogLevel) {
+    pub fn log(&self, msg: impl Into<String>, level: LogLevel) {
         if (level as i32) < (self.log_level as i32) {
             return;
         }
@@ -49,7 +49,8 @@ impl Logger {
         if self.use_curses {
             todo!("Curses not yet supported");
         } else {
-            let msg = msg.replace('\n', &format!("\n{} ", self.line_start));
+            let msg = msg.into().replace('\n', &format!("\n{} ", self.line_start));
+
             let message = format!("{} [{}] {}", self.line_start, level, msg);
             match level {
                 LogLevel::Dev => println!("{}", message.yellow()),
@@ -60,19 +61,19 @@ impl Logger {
         }
     }
 
-    pub fn dev(&self, msg: String) {
+    pub fn dev(&self, msg: impl Into<String>) {
         self.log(msg, LogLevel::Dev)
     }
 
-    pub fn inf(&self, msg: String) {
+    pub fn inf(&self, msg: impl Into<String>) {
         self.log(msg, LogLevel::Inf)
     }
 
-    pub fn err(&self, msg: String) {
+    pub fn err(&self, msg: impl Into<String>) {
         self.log(msg, LogLevel::Err)
     }
 
-    pub fn crit(&self, msg: String) {
+    pub fn crit(&self, msg: impl Into<String>) {
         self.log(msg, LogLevel::Crit)
     }
 }
