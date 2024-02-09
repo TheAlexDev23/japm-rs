@@ -19,14 +19,13 @@ impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Json(error) => write!(f, "Json Error: {}", error),
-            // _ => write!(f, "Unkown error"),
         }
     }
 }
 
 impl Package {
-    pub fn from_json(json: &String) -> Result<Package, Error> {
-        let package: Package = serde_json::from_str(&json)?;
+    pub fn from_json(json: &str) -> Result<Package, Error> {
+        let package: Package = serde_json::from_str(json)?;
 
         Ok(package)
     }

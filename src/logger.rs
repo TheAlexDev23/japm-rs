@@ -4,12 +4,14 @@ use std::{fmt::Display, fs::File};
 use colored::Colorize;
 
 pub struct Logger {
-    log_curses: bool,
+    use_curses: bool,
     line_start: String,
+    log_level: LogLevel,
     error_log_file: Vec<File>,
     log_file: Vec<File>,
 }
 
+#[derive(Clone, Copy)]
 pub enum LogLevel {
     Dev,
     Inf,
@@ -20,36 +22,46 @@ pub enum LogLevel {
 impl Display for LogLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LogLevel::Dev => write!(f, "Development"),
-            LogLevel::Inf=> write!(f, "Information"),
-            LogLevel::Err => write!(f, "Error"),
-            LogLevel::Crit => write!(f, "Critical"),
+            LogLevel::Dev => write!(f, "devel"),
+            LogLevel::Inf => write!(f, "info"),
+            LogLevel::Err => write!(f, "error"),
+            LogLevel::Crit => write!(f, "critical"),
         }
     }
 }
 
 impl Logger {
-    pub fn new(curses: bool) -> Logger {
+    pub fn new(use_curses: bool, log_level: LogLevel) -> Logger {
         Logger {
-            log_curses: curses,
+            use_curses,
             line_start: String::from("===>"),
+            log_level,
             error_log_file: Vec::new(),
             log_file: Vec::new(),
         }
     }
 
     pub fn log(&self, msg: String, level: LogLevel) {
-        if self.log_curses {
+        if (level as i32) < (self.log_level as i32) {
+            return;
+        }
+
+        if self.use_curses {
             todo!("Curses not yet supported");
         } else {
-            let message = format!("{} {} {}", self.line_start, level, msg);
+            let msg = msg.replace('\n', &format!("\n{} ", self.line_start));
+            let message = format!("{} [{}] {}", self.line_start, level, msg);
             match level {
                 LogLevel::Dev => println!("{}", message.yellow()),
-                LogLevel::Inf=> println!("{}", message.white()),
+                LogLevel::Inf => println!("{}", message.green()),
                 LogLevel::Err => eprintln!("{}", message.red()),
                 LogLevel::Crit => eprintln!("{}", message.purple()),
             }
         }
+    }
+
+    pub fn dev(&self, msg: String) {
+        self.log(msg, LogLevel::Dev)
     }
 
     pub fn inf(&self, msg: String) {

@@ -1,13 +1,9 @@
 use std::fs;
 use std::process::exit;
 
-use clap::{Parser, Subcommand, ArgAction};
+use clap::{ArgAction, Parser, Subcommand};
 
-use japml::{
-    action::Action,
-    action::ActionType,
-    package::Package,
-};
+use japml::{action::Action, action::ActionType, package::Package};
 
 use logger::Logger;
 
@@ -24,30 +20,47 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum CommandType {
-    Install { 
+    Install {
         #[arg(short, long, action=ArgAction::SetTrue)]
-        from_file: bool, 
-        packages: Vec<String> 
+        from_file: bool,
+        packages: Vec<String>,
     },
-    Remove { packages: Vec<String> },
-    Update { packages: Vec<String> },
-    Info { packages: Vec<String> },
+    Remove {
+        packages: Vec<String>,
+    },
+    Update {
+        packages: Vec<String>,
+    },
+    Info {
+        packages: Vec<String>,
+    },
 }
-
 
 fn main() {
     let args = Args::parse();
-    let logger = Logger::new(false);
+    let logger = Logger::new(false, logger::LogLevel::Dev);
 
     if let Some(command) = args.command {
         let result: Result<Vec<Action>, String> = match command {
-            CommandType::Install {from_file, packages} => install_packages(from_file, packages),
+            CommandType::Install {
+                from_file,
+                packages,
+            } => install_packages(from_file, packages),
             _ => todo!("Command is unsupported"),
         };
 
         match result {
-            Ok(actions) => logger.inf(format!("{actions:#?}")),
-            Err(error) => logger.crit(format!("Error while performing command:\n{}", error)),
+            Ok(actions) => {
+                for action in actions {
+                    if let Err(error) = action.commit(&logger) {
+                        logger.crit(format!("Error while commiting actions:\n{error}"))
+                    }
+                }
+            }
+            Err(error) => {
+                logger.crit(format!("Error while performing command:\n{}", error));
+                exit(-1);
+            }
         }
     }
 }
@@ -68,15 +81,15 @@ fn install_packages(from_file: bool, package_names: Vec<String>) -> Result<Vec<A
     let mut actions: Vec<Action> = Vec::new();
 
     for package in packages.iter() {
-        match get_dependencies_recursive(package, &|name| {get_package(name, from_file)}) {
+        match get_dependencies_recursive(package, &|name| get_package(name, from_file)) {
             Ok(dependencies) => {
                 for dependency in dependencies.into_iter() {
                     actions.push(Action {
                         action_type: ActionType::Install,
-                        package: dependency, 
+                        package: dependency,
                     });
                 }
-            },
+            }
             Err(error) => return Err(format!("Error getting package dependencies:\n{error}")),
         }
     }
@@ -90,15 +103,13 @@ fn get_package(name: &String, from_file: bool) -> Result<Package, String> {
         if !path.ends_with(".json") {
             path.push_str(".json");
         }
-        
+
         match fs::read_to_string(path) {
-            Ok(json_content) => {
-                match Package::from_json(&json_content) {
-                    Ok(package) => Ok(package),
-                    Err(error) => Err(format!("Error while parsing package:\n{error}")),
-                }
+            Ok(json_content) => match Package::from_json(&json_content) {
+                Ok(package) => Ok(package),
+                Err(error) => Err(format!("Error while parsing package:\n{error}")),
             },
-            Err(error) => Err(format!("Error reading file:\n{error}"))
+            Err(error) => Err(format!("Error reading file:\n{error}")),
         }
     } else {
         todo!("Non local package parsing is not supported");
@@ -106,8 +117,8 @@ fn get_package(name: &String, from_file: bool) -> Result<Package, String> {
 }
 
 fn get_dependencies_recursive<F, E>(package: &Package, get_package: &F) -> Result<Vec<Package>, E>
-where 
-    F : Fn(&String) -> Result<Package, E>
+where
+    F: Fn(&String) -> Result<Package, E>,
 {
     let mut dependencies: Vec<Package> = Vec::new();
     for dependency in package.dependencies.iter() {
