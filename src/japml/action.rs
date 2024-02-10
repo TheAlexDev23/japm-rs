@@ -1,7 +1,6 @@
+use log::{debug, trace, warn};
 use shell_words;
 use std::{fmt::Display, process::Command};
-
-use crate::logger::Logger;
 
 use super::package::Package;
 
@@ -27,21 +26,22 @@ impl Display for Action {
 }
 
 impl Action {
-    pub fn commit(self, logger: &Logger) -> Result<(), String> {
+    pub fn commit(self) -> Result<(), String> {
+        debug!("Action commit {self}");
         let command_iter = match self.action_type {
             ActionType::Install => self.package.install.iter(),
             ActionType::Remove => self.package.remove.iter(),
         };
 
         for command in command_iter {
-            logger.inf(format!("Running command {command}"));
+            debug!("Running command {command}");
             match run_command(command) {
                 Ok((stdout, stderr)) => {
                     if !stdout.is_empty() {
-                        logger.dev(format!("out: {stdout}"));
+                        debug!("out: {stdout}");
                     }
                     if !stderr.is_empty() {
-                        logger.err(format!("err: {stderr}"));
+                        warn!("err: {stderr}");
                     }
                 }
                 Err(error) => {
@@ -61,6 +61,8 @@ fn run_command(command: &str) -> Result<(String, String), String> {
                     "Error while attempting to run command. Cannot contain 0 arguments.",
                 ));
             }
+
+            trace!("Command as arguments: {args:?}");
 
             let args_iter = args.iter();
 

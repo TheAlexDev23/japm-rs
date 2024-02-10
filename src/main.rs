@@ -7,7 +7,8 @@ use japml::{
     action::Action, action::ActionType, package::searching::PackageSearchOptions, package::Package,
 };
 
-use logger::Logger;
+use log::{debug, error, info, trace};
+use logger::StdLogger;
 
 mod config;
 mod japml;
@@ -43,23 +44,25 @@ enum CommandType {
 
 fn main() {
     let args = Args::parse();
-    let log_level: logger::LogLevel = match args.verbose {
-        true => logger::LogLevel::Dev,
-        false => logger::LogLevel::Inf,
+
+    let logger: Box<StdLogger> = Box::default();
+
+    match log::set_boxed_logger(logger) {
+        Ok(()) => log::set_max_level(log::LevelFilter::Trace),
+        Err(error) => {
+            eprintln!("Could not setup logger: {error}");
+        }
     };
 
     if let Err(error_message) = Config::create_default_config_if_doesnt_exist() {
-        eprintln!(
-            "Something went wrong when attempting to verify or create default configs:\n{error_message}"
-        );
+        error!("Something went wrong when attempting to verify or create default configs:\n{error_message}");
         exit(-1);
     }
 
-    let logger = Logger::new(false, log_level);
     let config = match Config::from_default_config() {
         Ok(config) => config,
         Err(error) => {
-            logger.crit(format!("Error while attempting to load commit:\n{error}"));
+            log::error!("Error while attempting to load commit:\n{error}");
             exit(-1);
         }
     };
@@ -69,20 +72,20 @@ fn main() {
             CommandType::Install {
                 from_file,
                 packages,
-            } => install_packages(&logger, &config, packages, from_file),
+            } => install_packages(&config, packages, from_file),
             _ => todo!("Command is unsupported"),
         };
 
         match result {
             Ok(actions) => {
                 for action in actions {
-                    if let Err(error) = action.commit(&logger) {
-                        logger.crit(format!("Error while commiting actions:\n{error}"))
+                    if let Err(error_message) = action.commit() {
+                        error!("Error while commiting actions:\n{error_message}");
                     }
                 }
             }
-            Err(error) => {
-                logger.crit(format!("Error while performing command:\n{}", error));
+            Err(error_message) => {
+                error!("Error while performing command:\n{error_message}");
                 exit(-1);
             }
         }
@@ -90,7 +93,6 @@ fn main() {
 }
 
 fn install_packages(
-    logger: &Logger,
     config: &Config,
     package_names: Vec<String>,
     from_file: bool,
@@ -101,10 +103,10 @@ fn install_packages(
 
     let remotes: Vec<String> = config.remotes.values().cloned().collect();
 
-    logger.dev("Searching initial packages");
+    info!("Searching initial packages");
 
     for package_name in package_names.into_iter() {
-        logger.dev(format!("Searching initial package {package_name}"));
+        debug!("Searching initial package {package_name}");
 
         let search_options = if from_file {
             PackageSearchOptions::FromFile(&package_name)
@@ -115,7 +117,7 @@ fn install_packages(
             }
         };
 
-        match Package::find_package(search_options, logger) {
+        match Package::find_package(search_options) {
             Ok(package) => packages.push(package),
             Err(error) => return Err(format!("Error while installing package: {error}")),
         };
@@ -124,31 +126,33 @@ fn install_packages(
     // There is no way to guess how many dependencies a package could have
     let mut actions: Vec<Action> = Vec::new();
 
-    logger.inf("Searching dependencies");
+    let get_package = |name: &String| {
+        if from_file {
+            Package::find_package(PackageSearchOptions::FromFile(name))
+        } else {
+            Package::find_package(PackageSearchOptions::FromRemote {
+                name: name.clone(),
+                remotes: remotes.clone(),
+            })
+        }
+    };
+
+    info!("Searching dependencies");
     for package in packages.iter() {
-        match get_dependencies_recursive(package, &|name| {
-            if from_file {
-                Package::find_package(PackageSearchOptions::FromFile(name), logger)
-            } else {
-                Package::find_package(
-                    PackageSearchOptions::FromRemote {
-                        name: name.clone(),
-                        remotes: remotes.clone(),
-                    },
-                    logger,
-                )
-            }
-        }) {
+        match get_dependencies_recursive(package, &get_package) {
             Ok(dependencies) => {
-                logger.dev(format!(
+                trace!(
                     "Recursive dependencies for package {}: {:#?}",
-                    package.package_data.name, dependencies
-                ));
+                    package.package_data.name,
+                    dependencies
+                );
                 for dependency in dependencies.into_iter() {
-                    actions.push(Action {
+                    let action = Action {
                         action_type: ActionType::Install,
                         package: dependency,
-                    });
+                    };
+                    trace!("Adding action:\n{action}");
+                    actions.push(action);
                 }
             }
             Err(error) => return Err(format!("Error getting package dependencies:\n{error}")),

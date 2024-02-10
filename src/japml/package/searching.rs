@@ -1,9 +1,9 @@
 use std::fs;
 use std::io::Read;
 
+use log::{debug, warn};
 use reqwest::StatusCode;
 
-use crate::logger::Logger;
 use crate::Package;
 
 #[derive(Clone)]
@@ -13,7 +13,7 @@ pub enum PackageSearchOptions<'a> {
 }
 
 impl Package {
-    pub fn find_package(options: PackageSearchOptions, logger: &Logger) -> Result<Package, String> {
+    pub fn find_package(options: PackageSearchOptions) -> Result<Package, String> {
         let content = match options {
             PackageSearchOptions::FromFile(path) => {
                 let mut path: String = String::from(path);
@@ -34,21 +34,23 @@ impl Package {
                         None => return Err(format!("Could not find package {name}")),
                     };
 
-                    remote.push_str(format!("/packages/{name}/package.json").as_str());
+                    if remote.ends_with('/') {
+                        remote.push_str(format!("/packages/{name}/package.json").as_str());
+                    } else {
+                        remote.push_str(format!("packages/{name}/package.json").as_str());
+                    }
 
-                    let mut res = match reqwest::blocking::get(remote) {
+                    let mut res = match reqwest::blocking::get(&remote) {
                         Ok(res) => {
                             if res.status() != StatusCode::OK {
-                                logger.inf("Package {name} not found in remote {remote}");
+                                debug!("Package {name} not found in remote {remote}");
                                 continue;
                             }
 
                             res
                         }
                         Err(error) => {
-                            logger.err(format!(
-                                "Error while attempting to download package:\n{error}"
-                            ));
+                            warn!("Error while attempting to download package:\n{error}");
                             continue;
                         }
                     };
@@ -65,7 +67,7 @@ impl Package {
 
         match Package::from_json(&content) {
             Ok(package) => Ok(package),
-            Err(error) => return Err(format!("Error while parsing package:\n{error}")),
+            Err(error) => Err(format!("Error while parsing package:\n{error}")),
         }
     }
 }

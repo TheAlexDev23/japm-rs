@@ -2,6 +2,8 @@ use serde_json::Value as JsonValue;
 
 use std::{collections::HashMap, fs, path::Path};
 
+use log::trace;
+
 pub struct Config {
     pub remotes: HashMap<String, String>,
 }
@@ -10,10 +12,12 @@ const REMOTES_CONFIG_PATH: &str = "/etc/japm/remotes.json";
 
 impl Config {
     pub fn create_default_config_if_doesnt_exist() -> Result<(), String> {
+        trace!("Creating defalt configs if necessary.");
         Self::verify_if_remotes_exists_or_create_default()
     }
 
     pub fn from_default_config() -> Result<Config, String> {
+        trace!("Parsing configs.");
         let config = Config {
             remotes: match Self::get_remotes_from_config() {
                 Ok(remotes) => remotes,
@@ -28,11 +32,11 @@ impl Config {
         let remotes_config = Path::new(REMOTES_CONFIG_PATH);
 
         const DEFAULT_CONFIG: &str = r#"
-        {
-            "remotes": {
-                "base": "https://raw.githubusercontent.com/TheAlexDev23/japm-official-packages/main/"
-            }
-        }
+{
+    "remotes": {
+        "base": "https://raw.githubusercontent.com/TheAlexDev23/japm-official-packages/main/"
+    }
+}
         "#;
 
         match remotes_config.try_exists() {
@@ -62,10 +66,14 @@ impl Config {
     }
 
     fn get_remotes_from_config() -> Result<HashMap<String, String>, String> {
+        trace!("Reading remotes config");
+
         let remotes_content = match fs::read_to_string(REMOTES_CONFIG_PATH) {
             Ok(content) => content,
             Err(error) => return Err(format!("Error while reading remotes config\n:{error}")),
         };
+
+        trace!("Parsing remotes config");
 
         let root: JsonValue = match serde_json::from_str(&remotes_content) {
             Ok(json_value) => json_value,
