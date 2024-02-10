@@ -2,17 +2,17 @@ use std::process::exit;
 
 use clap::{ArgAction, Parser, Subcommand};
 
+use action::{Action, ActionType};
 use config::Config;
-use japml::{
-    action::Action, action::ActionType, package::searching::PackageSearchOptions, package::Package,
-};
+use package::{searching::PackageSearchOptions, Package};
 
 use log::{debug, error, info, trace};
 use logger::StdLogger;
 
+mod action;
 mod config;
-mod japml;
 mod logger;
+mod package;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
