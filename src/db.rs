@@ -1,11 +1,9 @@
 use std::fs::{self, File};
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
+use log::trace;
 
 use crate::package::Package;
-
-use log::trace;
 
 use diesel::sqlite::SqliteConnection;
 use diesel::{table, Connection, Insertable, Queryable, RunQueryDsl};
@@ -25,7 +23,7 @@ table! {
 }
 
 // Define the structure representing a package
-#[derive(Queryable, Insertable, Serialize, Deserialize, Debug)]
+#[derive(Queryable, Insertable, Debug)]
 #[diesel(table_name = packages)]
 struct DatabasePackage {
     name: String,
