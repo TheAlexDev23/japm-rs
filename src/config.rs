@@ -11,13 +11,14 @@ pub struct Config {
 const REMOTES_CONFIG_PATH: &str = "/etc/japm/remotes.json";
 
 impl Config {
-    pub fn create_default_config_if_doesnt_exist() -> Result<(), String> {
-        trace!("Creating defalt configs if necessary.");
-        Self::verify_if_remotes_exists_or_create_default()
-    }
+    pub fn new() -> Result<Config, String> {
+        if let Err(error) = Self::create_default_config_if_doesnt_exist() {
+            return Err(format!(
+                "Could not create default configs if necessary:\n{error}"
+            ));
+        }
 
-    pub fn from_default_config() -> Result<Config, String> {
-        trace!("Parsing configs.");
+        trace!("Parsing configs");
         let config = Config {
             remotes: match Self::get_remotes_from_config() {
                 Ok(remotes) => remotes,
@@ -28,7 +29,19 @@ impl Config {
         Ok(config)
     }
 
-    fn verify_if_remotes_exists_or_create_default() -> Result<(), String> {
+    fn create_default_config_if_doesnt_exist() -> Result<(), String> {
+        trace!("Creating defalt configs if necessary");
+
+        if let Err(error) = Self::create_remotes_config_if_necessary() {
+            return Err(format!(
+                "Could not create default remotes config if necessary:\n{error}"
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn create_remotes_config_if_necessary() -> Result<(), String> {
         let remotes_config = Path::new(REMOTES_CONFIG_PATH);
 
         const DEFAULT_CONFIG: &str = r#"

@@ -1,6 +1,7 @@
 use log::{debug, trace, warn};
-use shell_words;
 use std::{fmt::Display, process::Command};
+
+use crate::db::InstalledPackagesDb;
 
 use super::package::Package;
 
@@ -26,7 +27,7 @@ impl Display for Action {
 }
 
 impl Action {
-    pub fn commit(self) -> Result<(), String> {
+    pub fn commit(self, db: &mut InstalledPackagesDb) -> Result<(), String> {
         debug!("Action commit {self}");
         let command_iter = match self.action_type {
             ActionType::Install => self.package.install.iter(),
@@ -49,6 +50,16 @@ impl Action {
                 }
             }
         }
+
+        match self.action_type {
+            ActionType::Install => {
+                if let Err(error) = db.add_package(&self.package) {
+                    return Err(format!("Could not add package to local database:\n{error}"));
+                }
+            }
+            ActionType::Remove => todo!("Not supported"),
+        };
+
         Ok(())
     }
 }

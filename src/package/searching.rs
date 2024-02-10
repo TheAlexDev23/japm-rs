@@ -7,16 +7,16 @@ use reqwest::StatusCode;
 use crate::Package;
 
 #[derive(Clone)]
-pub enum PackageSearchOptions<'a> {
-    FromFile(&'a str),
-    FromRemote { name: String, remotes: Vec<String> },
+pub enum PackageSearchOptions {
+    FromFile,
+    FromRemote(Vec<String>),
 }
 
 impl Package {
-    pub fn find_package(options: PackageSearchOptions) -> Result<Package, String> {
+    pub fn find_package(name: &str, options: &PackageSearchOptions) -> Result<Package, String> {
         let content = match options {
-            PackageSearchOptions::FromFile(path) => {
-                let mut path: String = String::from(path);
+            PackageSearchOptions::FromFile => {
+                let mut path: String = String::from(name);
                 if !path.ends_with(".json") {
                     path.push_str(".json");
                 }
@@ -26,11 +26,11 @@ impl Package {
                     Err(error) => return Err(format!("Error reading package file:\n{error}")),
                 }
             }
-            PackageSearchOptions::FromRemote { name, remotes } => {
-                let mut remotes = remotes.into_iter();
+            PackageSearchOptions::FromRemote(remotes) => {
+                let mut remotes = remotes.iter();
                 loop {
                     let mut remote = match remotes.next() {
-                        Some(remote) => remote,
+                        Some(remote) => remote.clone(),
                         None => return Err(format!("Could not find package {name}")),
                     };
 

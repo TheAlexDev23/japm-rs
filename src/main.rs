@@ -1,9 +1,9 @@
-use std::process::exit;
-
 use clap::{ArgAction, Parser, Subcommand};
+use std::process::exit;
 
 use action::{Action, ActionType};
 use config::Config;
+use db::InstalledPackagesDb;
 use package::{searching::PackageSearchOptions, Package};
 
 use log::{debug, error, info, trace};
@@ -11,6 +11,7 @@ use logger::StdLogger;
 
 mod action;
 mod config;
+mod db;
 mod logger;
 mod package;
 
@@ -54,15 +55,18 @@ fn main() {
         }
     };
 
-    if let Err(error_message) = Config::create_default_config_if_doesnt_exist() {
-        error!("Something went wrong when attempting to verify or create default configs:\n{error_message}");
-        exit(-1);
-    }
-
-    let config = match Config::from_default_config() {
+    let config = match Config::new() {
         Ok(config) => config,
         Err(error) => {
-            log::error!("Error while attempting to load commit:\n{error}");
+            log::error!("Error while attempting to load config:\n{error}");
+            exit(-1);
+        }
+    };
+
+    let mut db = match InstalledPackagesDb::new() {
+        Ok(db) => db,
+        Err(error) => {
+            log::error!("Error while attempting to get installed packages database:\n{error}");
             exit(-1);
         }
     };
@@ -72,16 +76,26 @@ fn main() {
             CommandType::Install {
                 from_file,
                 packages,
-            } => install_packages(&config, packages, from_file),
+            } => {
+                let search_options = if from_file {
+                    PackageSearchOptions::FromFile
+                } else {
+                    PackageSearchOptions::FromRemote(config.remotes.values().cloned().collect())
+                };
+
+                install_packages(packages, search_options)
+            }
             _ => todo!("Command is unsupported"),
         };
 
         match result {
             Ok(actions) => {
                 for action in actions {
-                    if let Err(error_message) = action.commit() {
+                    trace!("Commiting action {action}");
+                    if let Err(error_message) = action.commit(&mut db) {
                         error!("Error while commiting actions:\n{error_message}");
                     }
+                    trace!("Commited action");
                 }
             }
             Err(error_message) => {
@@ -93,31 +107,19 @@ fn main() {
 }
 
 fn install_packages(
-    config: &Config,
     package_names: Vec<String>,
-    from_file: bool,
+    search_options: PackageSearchOptions,
 ) -> Result<Vec<Action>, String> {
     let packages_len = package_names.len();
 
     let mut packages: Vec<Package> = Vec::with_capacity(packages_len);
-
-    let remotes: Vec<String> = config.remotes.values().cloned().collect();
 
     info!("Searching initial packages");
 
     for package_name in package_names.into_iter() {
         debug!("Searching initial package {package_name}");
 
-        let search_options = if from_file {
-            PackageSearchOptions::FromFile(&package_name)
-        } else {
-            PackageSearchOptions::FromRemote {
-                name: package_name,
-                remotes: remotes.clone(),
-            }
-        };
-
-        match Package::find_package(search_options) {
+        match Package::find_package(&package_name, &search_options) {
             Ok(package) => packages.push(package),
             Err(error) => return Err(format!("Error while installing package: {error}")),
         };
@@ -126,20 +128,11 @@ fn install_packages(
     // There is no way to guess how many dependencies a package could have
     let mut actions: Vec<Action> = Vec::new();
 
-    let get_package = |name: &String| {
-        if from_file {
-            Package::find_package(PackageSearchOptions::FromFile(name))
-        } else {
-            Package::find_package(PackageSearchOptions::FromRemote {
-                name: name.clone(),
-                remotes: remotes.clone(),
-            })
-        }
-    };
-
     info!("Searching dependencies");
     for package in packages.iter() {
-        match get_dependencies_recursive(package, &get_package) {
+        match get_dependencies_recursive(package, &|name| {
+            Package::find_package(name, &search_options)
+        }) {
             Ok(dependencies) => {
                 trace!(
                     "Recursive dependencies for package {}: {:#?}",
