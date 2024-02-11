@@ -4,7 +4,7 @@ use std::io::Read;
 use log::{debug, warn};
 use reqwest::StatusCode;
 
-use crate::Package;
+use crate::RemotePackage;
 
 #[derive(Clone)]
 pub enum PackageSearchOptions {
@@ -12,8 +12,11 @@ pub enum PackageSearchOptions {
     FromRemote(Vec<String>),
 }
 
-impl Package {
-    pub fn find_package(name: &str, options: &PackageSearchOptions) -> Result<Package, String> {
+impl RemotePackage {
+    pub fn find_package(
+        name: &str,
+        options: &PackageSearchOptions,
+    ) -> Result<RemotePackage, String> {
         let content = match options {
             PackageSearchOptions::FromFile => {
                 let mut path: String = String::from(name);
@@ -65,7 +68,7 @@ impl Package {
             }
         };
 
-        match Package::from_json(&content) {
+        match RemotePackage::from_json(&content) {
             Ok(package) => Ok(package),
             Err(error) => Err(format!("Error while parsing package:\n{error}")),
         }

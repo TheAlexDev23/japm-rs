@@ -3,8 +3,8 @@ use std::process::exit;
 
 use action::Action;
 use config::Config;
-use db::InstalledPackagesDb;
-use package::{searching::PackageSearchOptions, Package};
+use db::{PackagesDb, SqlitePackagesDb};
+use package::{searching::PackageSearchOptions, RemotePackage};
 
 use log::{debug, error, info, trace};
 use logger::StdLogger;
@@ -55,7 +55,14 @@ fn main() {
         }
     };
 
-    let config = match Config::new() {
+    const CONFIG_PATH: &str = "/etc/japm/config.json";
+
+    if let Err(error) = Config::create_default_config_if_necessary(CONFIG_PATH) {
+        error!("Could not create defaul config if necessary:\n{error}");
+        exit(-1);
+    }
+
+    let config = match Config::from_file(CONFIG_PATH) {
         Ok(config) => config,
         Err(error) => {
             log::error!("Error while attempting to load config:\n{error}");
@@ -63,7 +70,12 @@ fn main() {
         }
     };
 
-    let mut db = match InstalledPackagesDb::new() {
+    if let Err(error) = SqlitePackagesDb::create_db_file_if_necessary() {
+        error!("Could not create db file if necessary:\n{error}");
+        exit(-1);
+    }
+
+    let mut db = match SqlitePackagesDb::new() {
         Ok(db) => db,
         Err(error) => {
             log::error!("Error while attempting to get installed packages database:\n{error}");
@@ -111,17 +123,25 @@ fn main() {
 fn install_packages(
     package_names: Vec<String>,
     search_options: PackageSearchOptions,
+    db: &impl PackagesDb,
 ) -> Result<Vec<Action>, String> {
     let packages_len = package_names.len();
 
-    let mut packages: Vec<Package> = Vec::with_capacity(packages_len);
+    let mut packages: Vec<RemotePackage> = Vec::with_capacity(packages_len);
 
     info!("Searching initial packages");
+
+    for package_name in package_names.iter() {
+        debug!("Querying db to verify that package is not installed for {package_name}");
+        if let Ok(_) = db.get_package(package_name) {
+            return Err(format!("Package {package_name} is already installed"));
+        }
+    }
 
     for package_name in package_names.into_iter() {
         debug!("Searching initial package {package_name}");
 
-        match Package::find_package(&package_name, &search_options) {
+        match RemotePackage::find_package(&package_name, &search_options) {
             Ok(package) => packages.push(package),
             Err(error) => return Err(format!("Error while installing package: {error}")),
         };
@@ -133,7 +153,7 @@ fn install_packages(
     info!("Searching dependencies");
     for package in packages.iter() {
         match get_dependencies_recursive(package, &|name| {
-            Package::find_package(name, &search_options)
+            RemotePackage::find_package(name, &search_options)
         }) {
             Ok(dependencies) => {
                 trace!(
@@ -156,7 +176,7 @@ fn install_packages(
 
 fn remove_packages(
     package_names: Vec<String>,
-    db: &mut InstalledPackagesDb,
+    db: &mut SqlitePackagesDb,
 ) -> Result<Vec<Action>, String> {
     info!("Searching initial packages");
     let mut actions: Vec<Action> = Vec::new();
@@ -177,11 +197,14 @@ fn remove_packages(
     Ok(actions)
 }
 
-fn get_dependencies_recursive<F, E>(package: &Package, get_package: &F) -> Result<Vec<Package>, E>
+fn get_dependencies_recursive<F, E>(
+    package: &RemotePackage,
+    get_package: &F,
+) -> Result<Vec<RemotePackage>, E>
 where
-    F: Fn(&String) -> Result<Package, E>,
+    F: Fn(&String) -> Result<RemotePackage, E>,
 {
-    let mut dependencies: Vec<Package> = Vec::new();
+    let mut dependencies: Vec<RemotePackage> = Vec::new();
     for dependency in package.dependencies.iter() {
         let dependency = get_package(dependency)?;
         dependencies.extend(get_dependencies_recursive(&dependency, get_package)?.into_iter());
