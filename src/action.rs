@@ -1,27 +1,21 @@
 use log::{debug, trace, warn};
 use std::{fmt::Display, process::Command};
 
-use crate::db::InstalledPackagesDb;
+use crate::db::{DatabasePackage, InstalledPackagesDb};
 
 use super::package::Package;
 
 #[derive(Clone, Debug)]
-pub struct Action {
-    pub action_type: ActionType,
-    pub package: Package,
-}
-
-#[derive(Clone, Debug)]
-pub enum ActionType {
-    Install,
-    Remove,
+pub enum Action {
+    Install(Package),
+    Remove(DatabasePackage),
 }
 
 impl Display for Action {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.action_type {
-            ActionType::Install => write!(f, "Install {}", self.package.package_data.name),
-            ActionType::Remove => write!(f, "Remove {}", self.package.package_data.name),
+        match self {
+            Action::Install(package) => write!(f, "Install {}", package.package_data.name),
+            Action::Remove(package) => write!(f, "Remove {}", package.package_data.name),
         }
     }
 }
@@ -29,9 +23,9 @@ impl Display for Action {
 impl Action {
     pub fn commit(self, db: &mut InstalledPackagesDb) -> Result<(), String> {
         debug!("Action commit {self}");
-        let command_iter = match self.action_type {
-            ActionType::Install => self.package.install.iter(),
-            ActionType::Remove => self.package.remove.iter(),
+        let command_iter = match self {
+            Action::Install(ref package) => package.install.iter(),
+            Action::Remove(ref package) => package.remove_instructions.iter(),
         };
 
         for command in command_iter {
@@ -51,13 +45,29 @@ impl Action {
             }
         }
 
-        match self.action_type {
-            ActionType::Install => {
-                if let Err(error) = db.add_package(&self.package) {
+        match self {
+            Action::Install(package) => {
+                if let Err(error) = db.add_package(&package) {
                     return Err(format!("Could not add package to local database:\n{error}"));
                 }
             }
-            ActionType::Remove => todo!("Not supported"),
+            Action::Remove(package) => {
+                let depending_packages = db.get_depending_packages(&package.package_data.name)?;
+                if !depending_packages.is_empty() {
+                    let depending_packages: Vec<String> = depending_packages
+                        .iter()
+                        .map(|package| package.package_data.name.clone())
+                        .collect();
+
+                    return Err(format!(
+                        "Removing package breaks dependencies: {depending_packages:?}",
+                    ));
+                }
+
+                if let Err(error) = db.remove_package(&package.package_data.name) {
+                    return Err(format!("Could not remove package from database:\n{error}"));
+                }
+            }
         };
 
         Ok(())

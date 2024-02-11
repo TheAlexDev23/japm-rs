@@ -3,10 +3,9 @@ use std::path::Path;
 
 use log::trace;
 
-use crate::package::Package;
+use crate::package::{Package, PackageData};
 
-use diesel::sqlite::SqliteConnection;
-use diesel::{table, Connection, Insertable, Queryable, RunQueryDsl};
+use diesel::prelude::*;
 
 pub struct InstalledPackagesDb {
     connection: SqliteConnection,
@@ -19,44 +18,49 @@ table! {
         version -> Text,
         description -> Text,
         remove_instructions -> Text,
+        dependencies -> Text,
     }
 }
 
-// Define the structure representing a package
-#[derive(Queryable, Insertable, Debug)]
+#[derive(Insertable, Debug)]
 #[diesel(table_name = packages)]
-struct DatabasePackage {
+/// Represens a new package to add to the package database
+struct AddPackage {
     name: String,
     version: String,
     description: String,
-    /// Json array of remove instructions
+    ///  Json array of remove instructions
     remove_instructions: String,
+    /// Json array of dependencies' names
+    dependencies: String,
 }
 
-impl TryFrom<&Package> for DatabasePackage {
-    type Error = String;
+#[derive(Queryable, Debug)]
+#[diesel(table_name = packages)]
+/// Represents a queryable package from the package database.
+struct GetPackage {
+    /// Id is generally not used as packages are accessed with strings in the database
+    _id: i32,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    /// Json array of remove instructions
+    pub remove_instructions: String,
+    /// Json array of dependencies' names
+    dependencies: String,
+}
 
-    fn try_from(package: &Package) -> Result<Self, Self::Error> {
-        Ok(DatabasePackage {
-            name: package.package_data.name.clone(),
-            version: package.package_data.version.clone(),
-            description: package.package_data.description.clone(),
-            remove_instructions: match serde_json::to_string(&package.install) {
-                Ok(string) => string,
-                Err(error) => {
-                    return Err(format!(
-                        "Could not convert package's install instructions to json:\n{error}"
-                    ))
-                }
-            },
-        })
-    }
+#[derive(Debug, Clone)]
+pub struct DatabasePackage {
+    pub package_data: PackageData,
+    pub remove_instructions: Vec<String>,
+    pub dependencies: Vec<String>,
 }
 
 const DATABASE_SOURCE: &str = "/var/lib/japm/packages.db";
 impl InstalledPackagesDb {
     pub fn new() -> Result<InstalledPackagesDb, String> {
-        if let Err(error) = create_db_file_if_necessary() {
+        if let Err(error) = Self::create_db_file_if_necessary() {
             return Err(format!(
                 "Error while attempting to create database if necessary:\n{error}"
             ));
@@ -81,7 +85,8 @@ impl InstalledPackagesDb {
                 name TEXT NOT NULL,
                 version TEXT NOT NULL,
                 description TEXT,
-                remove_instructions TEXT
+                remove_instructions TEXT,
+                dependencies TEXT
             )";
 
         trace!("Executing SQL create table query:\n{CREATE_TABLE_QUERY}");
@@ -93,10 +98,40 @@ impl InstalledPackagesDb {
         Ok(InstalledPackagesDb { connection })
     }
 
+    fn create_db_file_if_necessary() -> Result<(), String> {
+        trace!("Creating db file if necessary");
+
+        let database_path = Path::new(DATABASE_SOURCE);
+        match database_path.try_exists() {
+            Ok(exists) => {
+                if exists {
+                    return Ok(());
+                }
+
+                trace!("Creating database parent directory");
+
+                // Hardcoded directory allways has parent, unwrap is ok
+                if let Err(error) = fs::create_dir_all(database_path.parent().unwrap()) {
+                    return Err(format!(
+                        "Could not create database's directory/ies:\n{error}"
+                    ));
+                }
+
+                trace!("Creating database file");
+                if let Err(error) = File::create(DATABASE_SOURCE) {
+                    return Err(format!("Could not create database file:\n{error}"));
+                }
+
+                Ok(())
+            }
+            Err(error) => Err(format!("Could not verify if database exists:\n{error}")),
+        }
+    }
+
     pub fn add_package(&mut self, package: &Package) -> Result<(), String> {
         use self::packages::dsl::*;
 
-        let db_package: DatabasePackage = package.try_into()?;
+        let db_package: AddPackage = package.try_into()?;
 
         trace!("Inserting {db_package:#?} into the database");
 
@@ -108,34 +143,142 @@ impl InstalledPackagesDb {
         }
         Ok(())
     }
+
+    pub fn get_package(&mut self, package_name: &str) -> Result<DatabasePackage, String> {
+        use self::packages::dsl::*;
+
+        match packages
+            .filter(name.eq(package_name))
+            .first::<GetPackage>(&mut self.connection)
+        {
+            Ok(package) => match <GetPackage as TryInto<DatabasePackage>>::try_into(package) {
+                Ok(package) => Ok(package),
+                Err(error) => Err(format!(
+                    "Could not convert query type into package type:\n{error}"
+                )),
+            },
+            Err(error) => {
+                if error == diesel::NotFound {
+                    Err(String::from("No such package"))
+                } else {
+                    Err(format!("Error attempting to retrieve package:\n{error}"))
+                }
+            }
+        }
+    }
+
+    pub fn get_all_packages(&mut self) -> Result<Vec<DatabasePackage>, String> {
+        use self::packages::dsl::*;
+
+        match packages
+            .select(packages::all_columns())
+            .load::<GetPackage>(&mut self.connection)
+        {
+            Ok(all_packages) => {
+                let convert_into = |item: GetPackage| -> Result<DatabasePackage, String> {
+                    let package_name = item.name.clone();
+                    match item.try_into() {
+                        Ok(package) => Ok(package),
+                        // If there's an error we can print the specific package it happened to.
+                        Err(error) => Err(format!(
+                            "Could not convert query package {} into package:\n{}",
+                            package_name, error
+                        )),
+                    }
+                };
+
+                let all_packages: Result<Vec<DatabasePackage>, String> =
+                    all_packages.into_iter().map(convert_into).collect();
+
+                match all_packages {
+                    Ok(all_packages) => Ok(all_packages),
+                    Err(error) => Err(format!(
+                        "Could not map all query types to package type:\n{error}"
+                    )),
+                }
+            }
+            Err(error) => Err(format!("Could not get all packages:\n{error}")),
+        }
+    }
+
+    /// Returns a vector of all packags that depend on package with package_name
+    pub fn get_depending_packages(
+        &mut self,
+        package_name: &str,
+    ) -> Result<Vec<DatabasePackage>, String> {
+        let all_packages = self.get_all_packages()?;
+        let mut depending_packages: Vec<DatabasePackage> = Vec::new();
+
+        let package_name = String::from(package_name);
+
+        for package in all_packages.into_iter() {
+            if package.dependencies.contains(&package_name) {
+                depending_packages.push(package);
+            }
+        }
+
+        Ok(depending_packages)
+    }
+
+    pub fn remove_package(&mut self, package_name: &str) -> Result<(), String> {
+        use self::packages::dsl::*;
+
+        if let Err(error) =
+            diesel::delete(packages.filter(name.eq(package_name))).execute(&mut self.connection)
+        {
+            return Err(format!("Error while running remove query:\n{error}"));
+        }
+
+        Ok(())
+    }
 }
 
-pub fn create_db_file_if_necessary() -> Result<(), String> {
-    trace!("Creating db file if necessary");
+impl TryFrom<&Package> for AddPackage {
+    type Error = String;
 
-    let database_path = Path::new(DATABASE_SOURCE);
-    match database_path.try_exists() {
-        Ok(exists) => {
-            if exists {
-                return Ok(());
-            }
+    fn try_from(package: &Package) -> Result<Self, Self::Error> {
+        Ok(AddPackage {
+            name: package.package_data.name.clone(),
+            version: package.package_data.version.clone(),
+            description: package.package_data.description.clone(),
+            remove_instructions: match serde_json::to_string(&package.remove) {
+                Ok(string) => string,
+                Err(error) => {
+                    return Err(format!(
+                        "Could not convert package's install instructions to json:\n{error}"
+                    ))
+                }
+            },
+            dependencies: match serde_json::to_string(&package.dependencies) {
+                Ok(string) => string,
+                Err(error) => {
+                    return Err(format!(
+                        "Could not convert the package's dependencies to json:\n{error}"
+                    ))
+                }
+            },
+        })
+    }
+}
 
-            trace!("Creating database parent directory");
+impl TryInto<DatabasePackage> for GetPackage {
+    type Error = String;
 
-            // Hardcoded directory allways has parent, unwrap is ok
-            if let Err(error) = fs::create_dir_all(database_path.parent().unwrap()) {
-                return Err(format!(
-                    "Could not create database's directory/ies:\n{error}"
-                ));
-            }
-
-            trace!("Creating database file");
-            if let Err(error) = File::create(DATABASE_SOURCE) {
-                return Err(format!("Could not create database file:\n{error}"));
-            }
-
-            Ok(())
-        }
-        Err(error) => Err(format!("Could not verify if database exists:\n{error}")),
+    fn try_into(self) -> Result<DatabasePackage, Self::Error> {
+        Ok(DatabasePackage {
+            package_data: PackageData {
+                name: self.name,
+                version: self.version,
+                description: self.description,
+            },
+            remove_instructions: match serde_json::from_str(&self.remove_instructions) {
+                Ok(result) => result,
+                Err(error) => return Err(format!("Could not parse remove instructions:\n{error}")),
+            },
+            dependencies: match serde_json::from_str(&self.dependencies) {
+                Ok(result) => result,
+                Err(error) => return Err(format!("Could not parse dependencies:\n{error}")),
+            },
+        })
     }
 }

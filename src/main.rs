@@ -1,7 +1,7 @@
 use clap::{ArgAction, Parser, Subcommand};
 use std::process::exit;
 
-use action::{Action, ActionType};
+use action::Action;
 use config::Config;
 use db::InstalledPackagesDb;
 use package::{searching::PackageSearchOptions, Package};
@@ -85,6 +85,7 @@ fn main() {
 
                 install_packages(packages, search_options)
             }
+            CommandType::Remove { packages } => remove_packages(packages, &mut db),
             _ => todo!("Command is unsupported"),
         };
 
@@ -93,9 +94,10 @@ fn main() {
                 for action in actions {
                     trace!("Commiting action {action}");
                     if let Err(error_message) = action.commit(&mut db) {
-                        error!("Error while commiting actions:\n{error_message}");
+                        error!("Could not commit action:\n{error_message}");
+                    } else {
+                        trace!("Commited action");
                     }
-                    trace!("Commited action");
                 }
             }
             Err(error_message) => {
@@ -140,16 +142,36 @@ fn install_packages(
                     dependencies
                 );
                 for dependency in dependencies.into_iter() {
-                    let action = Action {
-                        action_type: ActionType::Install,
-                        package: dependency,
-                    };
+                    let action = Action::Install(dependency);
                     trace!("Adding action:\n{action}");
                     actions.push(action);
                 }
             }
             Err(error) => return Err(format!("Error getting package dependencies:\n{error}")),
         }
+    }
+
+    Ok(actions)
+}
+
+fn remove_packages(
+    package_names: Vec<String>,
+    db: &mut InstalledPackagesDb,
+) -> Result<Vec<Action>, String> {
+    info!("Searching initial packages");
+    let mut actions: Vec<Action> = Vec::new();
+
+    for package_name in package_names.into_iter() {
+        debug!("Searching initial package {package_name}");
+
+        let db_package = match db.get_package(&package_name) {
+            Ok(package) => package,
+            Err(error) => return Err(format!("Could not get package from db:\n{error}")),
+        };
+
+        let action = Action::Remove(db_package);
+        trace!("Adding action {action}");
+        actions.push(action);
     }
 
     Ok(actions)
