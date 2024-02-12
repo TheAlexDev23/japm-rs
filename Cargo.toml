@@ -17,3 +17,4 @@ diesel = { version = "2.1", features = ["sqlite"] }
 
 # Used for unit testing
 rand = "0.8.5"
+linked-hash-map = "0.5.6"

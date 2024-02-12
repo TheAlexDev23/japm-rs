@@ -1,14 +1,13 @@
 use log::{debug, trace, warn};
 use std::{fmt::Display, process::Command};
 
-use crate::db::{DatabasePackage, InstalledPackagesDb};
+use crate::db::PackagesDb;
+use crate::package::{LocalPackage, RemotePackage};
 
-use super::package::Package;
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Action {
-    Install(Package),
-    Remove(DatabasePackage),
+    Install(RemotePackage),
+    Remove(LocalPackage),
 }
 
 impl Display for Action {
@@ -21,7 +20,7 @@ impl Display for Action {
 }
 
 impl Action {
-    pub fn commit(self, db: &mut InstalledPackagesDb) -> Result<(), String> {
+    pub fn commit(self, db: &mut impl PackagesDb) -> Result<(), String> {
         debug!("Action commit {self}");
         let command_iter = match self {
             Action::Install(ref package) => package.install.iter(),
@@ -52,18 +51,6 @@ impl Action {
                 }
             }
             Action::Remove(package) => {
-                let depending_packages = db.get_depending_packages(&package.package_data.name)?;
-                if !depending_packages.is_empty() {
-                    let depending_packages: Vec<String> = depending_packages
-                        .iter()
-                        .map(|package| package.package_data.name.clone())
-                        .collect();
-
-                    return Err(format!(
-                        "Removing package breaks dependencies: {depending_packages:?}",
-                    ));
-                }
-
                 if let Err(error) = db.remove_package(&package.package_data.name) {
                     return Err(format!("Could not remove package from database:\n{error}"));
                 }

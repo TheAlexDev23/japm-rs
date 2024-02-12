@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 pub mod searching;
 
-#[derive(Default, Debug, Deserialize, Clone)]
+#[derive(Default, Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct RemotePackage {
     pub package_data: PackageData,
 
@@ -14,23 +14,23 @@ pub struct RemotePackage {
     pub files: Vec<RemoteFile>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct LocalPackage {
     pub package_data: PackageData,
 
     pub dependencies: Vec<String>,
 
-    pub remove: Vec<String>,
+    pub remove_instructions: Vec<String>,
 }
 
-#[derive(Default, Debug, Deserialize, Clone)]
+#[derive(Default, Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct PackageData {
     pub name: String,
     pub version: String,
     pub description: String,
 }
 
-#[derive(Default, Debug, Deserialize, Clone)]
+#[derive(Default, Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct RemoteFile {
     pub url: String,
     pub target_path: String,

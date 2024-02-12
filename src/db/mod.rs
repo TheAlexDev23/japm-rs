@@ -264,7 +264,7 @@ impl TryInto<LocalPackage> for GetPackage {
                 version: self.version,
                 description: self.description,
             },
-            remove: match serde_json::from_str(&self.remove_instructions) {
+            remove_instructions: match serde_json::from_str(&self.remove_instructions) {
                 Ok(result) => result,
                 Err(error) => return Err(format!("Could not parse remove instructions:\n{error}")),
             },
