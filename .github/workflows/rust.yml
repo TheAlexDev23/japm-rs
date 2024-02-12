@@ -1,0 +1,41 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install cargo check tools
+      run: |
+        cargo install --locked cargo-outdated || true
+        cargo install --locked cargo-udeps || true
+        cargo install --locked cargo-audit || true
+        cargo install --locked cargo-pants || true
+    - name: Build
+      continue-on-error: false
+      run: cargo build --verbose
+    - name: Run tests
+      continue-on-error: false
+      run: cargo test --verbose
+    - name: Check vulnerabilities
+      continue-on-error: false
+      run: |
+        cargo audit
+        cargo pants
+    - name: Check dependency state
+      run: |
+        cargo outdated --exit-code 1
+        cargo udeps
+    - name: Lint
+      run: cargo clippy -- -Dwarnings
