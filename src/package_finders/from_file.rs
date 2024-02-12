@@ -14,7 +14,7 @@ impl PackageFinder for FromFilePackageFinder {
 
         match fs::read_to_string(path) {
             Ok(json_content) => Ok(RemotePackage::from_json(&json_content)?),
-            Err(error) => return Err(format!("Error reading package file:\n{error}")),
+            Err(error) => Err(format!("Error reading package file:\n{error}")),
         }
     }
 }

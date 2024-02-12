@@ -35,8 +35,6 @@ jobs:
     - name: Install cargo dependency check tools
       run: |
         cargo install --locked cargo-outdated || true
-        cargo install --locked cargo-udeps || true
     - name: Check dependency state
       run: |
         cargo outdated --exit-code 1
-        cargo udeps

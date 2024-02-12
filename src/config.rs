@@ -68,7 +68,7 @@ impl Config {
 
     pub fn from_json(json_content: &str) -> Result<Config, String> {
         Ok(Config {
-            remotes: match Self::get_remotes_from_config(&json_content) {
+            remotes: match Self::get_remotes_from_config(json_content) {
                 Ok(remotes) => remotes,
                 Err(error) => return Err(format!("Could not get remotes:\n{error}")),
             },

@@ -27,7 +27,7 @@ pub fn install_packages(
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
 
     for package_name in packages.iter() {
-        match install_package(&package_name, package_finder, reinstall, db) {
+        match install_package(package_name, package_finder, reinstall, db) {
             Ok(new_actions) => actions.extend(new_actions),
             Err(error) => {
                 return Err(format!(
@@ -37,7 +37,7 @@ pub fn install_packages(
         }
     }
 
-    Ok(actions.keys().map(|k| k.clone()).collect())
+    Ok(actions.keys().cloned().collect())
 }
 
 pub fn remove_packages(
@@ -58,7 +58,7 @@ pub fn remove_packages(
         }
     }
 
-    Ok(actions.keys().map(|k| k.clone()).collect())
+    Ok(actions.keys().cloned().collect())
 }
 
 fn install_package(
@@ -107,7 +107,7 @@ fn remove_package(
 
     debug!("Searching initial package {package_name}");
 
-    let db_package = match db.get_package(&package_name) {
+    let db_package = match db.get_package(package_name) {
         Ok(package) => package,
         Err(error) => return Err(format!("Could not get package from db:\n{error}")),
     };
