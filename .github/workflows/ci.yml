@@ -24,12 +24,14 @@ jobs:
   linting:
     runs-on: ubuntu-latest
     steps:
+    - uses: actions/checkout@v3
     - name: Lint with clippy
       run: cargo clippy -- -Dwarnings
 
   dependency-checking:
     runs-on: ubuntu-latest
     steps:
+    - uses: actions/checkout@v3
     - name: Install cargo dependency check tools
       run: |
         cargo install --locked cargo-outdated || true
