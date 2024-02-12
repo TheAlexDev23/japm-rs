@@ -3,7 +3,6 @@ use log::{debug, info, trace};
 use crate::action::Action;
 use crate::db::PackagesDb;
 
-use crate::package::searching::PackageSearchOptions;
 use crate::package::RemotePackage;
 
 use linked_hash_map::LinkedHashMap;
@@ -12,16 +11,23 @@ use linked_hash_map::LinkedHashMap;
 /// in the same order items where inserted.
 type LinkedHashSet<T> = LinkedHashMap<T, ()>;
 
+#[cfg(test)]
+mod tests;
+
+pub trait PackageFinder {
+    fn find_package(&self, package_name: &str) -> Result<RemotePackage, String>;
+}
+
 pub fn install_packages(
     packages: Vec<String>,
-    search_options: PackageSearchOptions,
+    package_finder: &dyn PackageFinder,
     reinstall: bool,
     db: &mut impl PackagesDb,
 ) -> Result<Vec<Action>, String> {
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
 
     for package_name in packages.iter() {
-        match install_package(&package_name, &search_options, reinstall, db) {
+        match install_package(&package_name, package_finder, reinstall, db) {
             Ok(new_actions) => actions.extend(new_actions),
             Err(error) => {
                 return Err(format!(
@@ -57,7 +63,7 @@ pub fn remove_packages(
 
 fn install_package(
     package_name: &str,
-    search_options: &PackageSearchOptions,
+    package_finder: &dyn PackageFinder,
     reinstall: bool,
     db: &mut impl PackagesDb,
 ) -> Result<LinkedHashSet<Action>, String> {
@@ -68,18 +74,23 @@ fn install_package(
     if let Ok(local_package) = db.get_package(package_name) {
         if reinstall {
             info!("Package {package_name} already installed, reinstalling...");
+            // It's also possible to call remove_package and get the packge removal specific actions.
+            // But this can cause issues.
+            // - First a pointless database query for existance of the packge which is already guaranteed.
+            // - Second, all the recursive removal related issues. We reinstall a package and there's no need to check for dependency
+            // break as we will be installing it back again.
             actions.insert(Action::Remove(local_package), ());
         } else {
-            info!("Package {package_name} already installed. Ignoring... If you want to reinstall pass the --reinstall parameter");
+            info!("Package {package_name} already installed. Ignoring...");
             return Ok(actions);
         }
     }
 
-    let package = RemotePackage::find_package(package_name, search_options)?;
+    let package = package_finder.find_package(package_name)?;
 
     trace!("Found remote package:\n{package:#?}");
     for dependency in package.dependencies.iter() {
-        actions.extend(install_package(&dependency, search_options, reinstall, db)?);
+        actions.extend(install_package(dependency, package_finder, reinstall, db)?);
     }
 
     actions.insert(Action::Install(package), ());
@@ -119,7 +130,7 @@ fn remove_package(
                     .collect();
 
                 return Err(format!(
-                    "Removing package breaks dependencies: {depending_packages:?}. If you want to also remove dependencies pass the --recursive parameter"
+                    "Removing package breaks dependencies: {depending_packages:?}. "
                 ));
             }
         }

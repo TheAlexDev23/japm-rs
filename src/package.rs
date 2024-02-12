@@ -1,7 +1,5 @@
 use serde::Deserialize;
 
-pub mod searching;
-
 #[derive(Default, Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
 pub struct RemotePackage {
     pub package_data: PackageData,
@@ -20,7 +18,7 @@ pub struct LocalPackage {
 
     pub dependencies: Vec<String>,
 
-    pub remove_instructions: Vec<String>,
+    pub remove: Vec<String>,
 }
 
 #[derive(Default, Debug, Deserialize, Clone, Hash, PartialEq, Eq)]

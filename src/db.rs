@@ -10,7 +10,7 @@ use diesel::prelude::*;
 pub trait PackagesDb {
     fn add_package(&mut self, package: &RemotePackage) -> Result<(), String>;
     fn remove_package(&mut self, package_name: &str) -> Result<(), String>;
-    fn get_package(&mut self, name: &str) -> Result<LocalPackage, String>;
+    fn get_package(&mut self, package_name: &str) -> Result<LocalPackage, String>;
     fn get_all_packages(&mut self) -> Result<Vec<LocalPackage>, String>;
     fn get_depending_packages(&mut self, package_name: &str) -> Result<Vec<LocalPackage>, String>;
 }
@@ -264,7 +264,7 @@ impl TryInto<LocalPackage> for GetPackage {
                 version: self.version,
                 description: self.description,
             },
-            remove_instructions: match serde_json::from_str(&self.remove_instructions) {
+            remove: match serde_json::from_str(&self.remove_instructions) {
                 Ok(result) => result,
                 Err(error) => return Err(format!("Could not parse remove instructions:\n{error}")),
             },

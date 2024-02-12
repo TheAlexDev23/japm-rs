@@ -8,7 +8,8 @@ use clap::{ArgAction, Parser, Subcommand};
 use action::Action;
 use config::Config;
 use db::SqlitePackagesDb;
-use package::{searching::PackageSearchOptions, RemotePackage};
+
+use crate::commands::PackageFinder;
 
 mod action;
 mod commands;
@@ -16,6 +17,7 @@ mod config;
 mod db;
 mod logger;
 mod package;
+mod package_finders;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -96,13 +98,13 @@ fn main() {
                 reinstall,
                 packages,
             } => {
-                let search_options = if from_file {
-                    PackageSearchOptions::FromFile
+                let finder: Box<dyn PackageFinder> = if from_file {
+                    Box::new(package_finders::FromFilePackageFinder)
                 } else {
-                    PackageSearchOptions::FromRemote(config.remotes.values().cloned().collect())
+                    Box::new(package_finders::RemotePackageFinder::new(&config))
                 };
 
-                commands::install_packages(packages, search_options, reinstall, &mut db)
+                commands::install_packages(packages, &*finder, reinstall, &mut db)
             }
             CommandType::Remove {
                 packages,

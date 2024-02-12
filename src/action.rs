@@ -24,7 +24,7 @@ impl Action {
         debug!("Action commit {self}");
         let command_iter = match self {
             Action::Install(ref package) => package.install.iter(),
-            Action::Remove(ref package) => package.remove_instructions.iter(),
+            Action::Remove(ref package) => package.remove.iter(),
         };
 
         for command in command_iter {
