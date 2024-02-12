@@ -63,14 +63,16 @@ impl Config {
             Err(error) => return Err(format!("Error while reading remotes config\n:{error}")),
         };
 
-        let config = Config {
-            remotes: match Self::get_remotes_from_config(&config_content) {
+        Self::from_json(&config_content)
+    }
+
+    pub fn from_json(json_content: &str) -> Result<Config, String> {
+        Ok(Config {
+            remotes: match Self::get_remotes_from_config(&json_content) {
                 Ok(remotes) => remotes,
                 Err(error) => return Err(format!("Could not get remotes:\n{error}")),
             },
-        };
-
-        Ok(config)
+        })
     }
 
     fn get_remotes_from_config(config_content: &str) -> Result<HashMap<String, String>, String> {
