@@ -4,9 +4,15 @@ const CONFIG_PATH: &str = "/tmp/japm/tests/config.json";
 
 #[test]
 fn test_default_config_created_properly() {
+    if fs::metadata(CONFIG_PATH).is_ok() {
+        fs::remove_file(CONFIG_PATH).expect("Could not remove test file");
+    }
+
     assert!(Config::create_default_config_if_necessary(CONFIG_PATH).is_ok());
 
     assert!(fs::metadata(CONFIG_PATH).is_ok());
+
+    assert!(Config::write_default_config(CONFIG_PATH).is_ok());
 
     let config = Config::from_file(CONFIG_PATH);
 

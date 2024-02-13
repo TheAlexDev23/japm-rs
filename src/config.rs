@@ -1,10 +1,12 @@
 use serde_json::Value as JsonValue;
 
-use std::{collections::HashMap, fs, path::Path};
-use std::io;
+use std::fs;
+use std::collections::HashMap;
+use std::path::Path;
+use std::io::{self};
 use std::fmt::{self, Display};
 
-use log::{info, trace};
+use log::trace;
 
 #[cfg(test)]
 mod tests;
@@ -48,27 +50,27 @@ impl From<serde_json::Error> for Error {
 
 
 impl Config {
-    pub fn create_default_config_if_necessary(config_path: &str) -> Result<(), io::Error> {
-        trace!("Creating defalt configs if necessary");
+    pub fn create_default_config_if_necessary(config_path: &str) -> Result<bool, io::Error> {
+        trace!("Creating default configs if necessary");
 
         let config_path = Path::new(config_path);
 
         match config_path.try_exists()? {
-            true => Ok(()),
+            true => Ok(false),
             false => {
-                info!("Config file does not exist. Creating new...");
-
-                trace!("Creating config parent directories.");
-
+                trace!("Creating config file parent directories.");
                 fs::create_dir_all(config_path.parent().unwrap())?;
 
-                trace!("Creating and writing to config file.");
+                trace!("Creating config file.");
+                fs::File::create(config_path)?;
 
-                fs::write(config_path, DEFAULT_CONFIG)?;
-
-                Ok(())
+                Ok(true)
             }
         }
+    }
+
+    pub fn write_default_config(config_path: &str) -> Result<(), io::Error> {
+        fs::write(config_path, DEFAULT_CONFIG)
     }
 
     pub fn from_file(config_path: &str) -> Result<Config, Error> {

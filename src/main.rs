@@ -65,9 +65,19 @@ fn main() {
 
     const CONFIG_PATH: &str = "/etc/japm/config.json";
 
-    if let Err(error) = Config::create_default_config_if_necessary(CONFIG_PATH) {
-        error!("Could not create default config if necessary:\n{error}");
-        exit(-1);
+    match Config::create_default_config_if_necessary(CONFIG_PATH) {
+        Ok(created) => {
+            if created {
+                if let Err(error) = Config::write_default_config(CONFIG_PATH) {
+                    error!("Could not write default config:\n{error}");
+                    exit(-1);
+                }
+            }
+        },
+        Err(error) => {
+            error!("Could not create default config if necessary:\n{error}");
+            exit(-1);
+        }
     }
 
     let config = match Config::from_file(CONFIG_PATH) {
