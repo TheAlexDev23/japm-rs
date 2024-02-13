@@ -72,11 +72,9 @@ fn run_command(command: &str) -> Result<(String, String), String> {
 
             trace!("Command as arguments: {args:?}");
 
-            let args_iter = args.iter();
+            let mut args_iter = args.iter();
 
-            // .iter().next() instead of get(0) is necessary to consume first item of iter
-            #[allow(clippy::all)]
-            let mut command = Command::new(args.iter().next().unwrap());
+            let mut command = Command::new(args_iter.next().unwrap());
 
             for arg in args_iter {
                 command.arg(arg);
