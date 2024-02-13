@@ -1,11 +1,16 @@
+use std::io;
 use std::io::Read;
+
+use thiserror::Error;
 
 use log::{debug, warn};
 
 use reqwest::StatusCode;
 
-use crate::{commands::PackageFinder, config::Config, package::RemotePackage};
+use crate::package::RemotePackage;
+use crate::{commands::PackageFinder, config::Config};
 
+#[derive(Debug)]
 pub struct RemotePackageFinder {
     remotes: Vec<String>,
 }
@@ -18,13 +23,22 @@ impl RemotePackageFinder {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum PackageFindError {
+    #[error("Could not read response body: {0}")]
+    Read(#[from] io::Error),
+    #[error("A json error has occured: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
 impl PackageFinder for RemotePackageFinder {
-    fn find_package(&self, package_name: &str) -> Result<crate::package::RemotePackage, String> {
+    type Error = PackageFindError;
+    fn find_package(&self, package_name: &str) -> Result<Option<RemotePackage>, Self::Error> {
         let mut remotes = self.remotes.iter();
         let json_content = loop {
             let mut remote = match remotes.next() {
                 Some(remote) => remote.clone(),
-                None => return Err(format!("Could not find package {package_name}")),
+                None => return Ok(None),
             };
 
             if remote.ends_with('/') {
@@ -49,13 +63,10 @@ impl PackageFinder for RemotePackageFinder {
             };
 
             let mut body = String::new();
-            if let Err(error) = res.read_to_string(&mut body) {
-                return Err(format!("Error reading response body:\n{error}"));
-            }
-
+            res.read_to_string(&mut body)?;
             break body;
         };
 
-        RemotePackage::from_json(&json_content)
+        Ok(Some(RemotePackage::from_json(&json_content)?))
     }
 }

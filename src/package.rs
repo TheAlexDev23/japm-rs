@@ -35,10 +35,7 @@ pub struct RemoteFile {
 }
 
 impl RemotePackage {
-    pub fn from_json(json: &str) -> Result<RemotePackage, String> {
-        match serde_json::from_str(json) {
-            Ok(package) => Ok(package),
-            Err(error) => Err(format!("Error parsing json:\n{error}")),
-        }
+    pub fn from_json(json: &str) -> Result<RemotePackage, serde_json::Error> {
+        serde_json::from_str(json)
     }
 }

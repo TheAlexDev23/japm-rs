@@ -5,11 +5,8 @@ use logger::StdLogger;
 
 use clap::{ArgAction, Parser, Subcommand};
 
-use action::Action;
 use config::Config;
 use db::SqlitePackagesDb;
-
-use crate::commands::PackageFinder;
 
 mod action;
 mod commands;
@@ -18,6 +15,9 @@ mod db;
 mod logger;
 mod package;
 mod package_finders;
+
+#[cfg(test)]
+mod test_helpers;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -68,41 +68,51 @@ fn main() {
     let mut db = get_db();
 
     if let Some(command) = args.command {
-        let result: Result<Vec<Action>, String> = match command {
+        let result: Result<Vec<action::Action>, String> = match command {
             CommandType::Install {
                 from_file,
                 reinstall,
                 packages,
             } => {
-                let finder: Box<dyn PackageFinder> = if from_file {
-                    Box::new(package_finders::FromFilePackageFinder)
+                if from_file {
+                    commands::install_packages(
+                        packages,
+                        &package_finders::FromFilePackageFinder,
+                        reinstall,
+                        &mut db,
+                    )
+                    .map_err(|e| e.to_string())
                 } else {
-                    Box::new(package_finders::RemotePackageFinder::new(&config))
-                };
-
-                commands::install_packages(packages, &*finder, reinstall, &mut db)
+                    commands::install_packages(
+                        packages,
+                        &package_finders::RemotePackageFinder::new(&config),
+                        reinstall,
+                        &mut db,
+                    )
+                    .map_err(|e| e.to_string())
+                }
             }
             CommandType::Remove {
                 packages,
                 recursive,
-            } => commands::remove_packages(packages, recursive, &mut db),
+            } => commands::remove_packages(packages, recursive, &mut db).map_err(|e| e.to_string()),
             _ => todo!("Command is unsupported"),
         };
 
         match result {
             Ok(actions) => {
-                trace!("Performing actions:\\n{actions:#?}");
+                trace!("Performing actions:\n{actions:#?}");
                 for action in actions {
                     trace!("Commiting action {action}");
                     if let Err(error_message) = action.commit(&mut db) {
-                        error!("Could not commit action:\\n{error_message}");
+                        error!("Could not commit action:\n{error_message}");
                     } else {
                         trace!("Commited action");
                     }
                 }
             }
             Err(error_message) => {
-                error!("Error while performing command:\\n{error_message}");
+                error!("Error while performing command:\n{error_message}");
                 exit(-1);
             }
         }
@@ -116,33 +126,38 @@ fn get_config() -> Config {
         Ok(created) => {
             if created {
                 if let Err(error) = Config::write_default_config(CONFIG_PATH) {
-                    error!("Could not write default config:\\n{error}");
+                    error!("Could not write default config:\n{error}");
                     exit(-1);
                 }
             }
-        },
+        }
         Err(error) => {
-            error!("Could not create default config if necessary:\\n{error}");
+            error!("Could not create default config if necessary:\n{error}");
             exit(-1);
         }
     }
 
-    let config = match Config::from_file(CONFIG_PATH) {
+    match Config::from_file(CONFIG_PATH) {
         Ok(config) => config,
         Err(error) => {
             match error {
-                config::Error::IO(error) => error!("Could not parse config due to an IO error: {error}"),
-                config::Error::Json(error) => error!("Could not parse config due to a json eror: {error}"),
-                config::Error::Syntax(error_message) => error!("Could not parse config due to invalid structure/parameters: {error_message}"),
+                config::Error::IO(error) => {
+                    error!("Could not parse config due to an IO error: {error}")
+                }
+                config::Error::Json(error) => {
+                    error!("Could not parse config due to a json eror: {error}")
+                }
+                config::Error::Syntax(error_message) => error!(
+                    "Could not parse config due to invalid structure/parameters: {error_message}"
+                ),
             }
             exit(-1);
         }
-    };
-    config
+    }
 }
 
 fn get_db() -> SqlitePackagesDb {
-     match SqlitePackagesDb::create_db_file_if_necessary() {
+    match SqlitePackagesDb::create_db_file_if_necessary() {
         Ok(created) => {
             let mut db = match SqlitePackagesDb::new() {
                 Ok(db) => db,
@@ -157,7 +172,7 @@ fn get_db() -> SqlitePackagesDb {
                     error!("Could not initialize database:\n{error}");
                     exit(-1);
                 }
-            } 
+            }
 
             db
         }

@@ -4,6 +4,9 @@ use std::{fmt::Display, process::Command};
 use crate::db::PackagesDb;
 use crate::package::{LocalPackage, RemotePackage};
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Action {
     Install(RemotePackage),
