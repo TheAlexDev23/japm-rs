@@ -1,11 +1,19 @@
 use std::fs::{self, File};
 use std::path::Path;
+use std::io;
+use std::fmt::{self, Display};
 
-use log::trace;
+use log::{trace, info};
 
 use crate::package::{LocalPackage, PackageData, RemotePackage};
 
 use diesel::prelude::*;
+
+// diesel has questionable naming
+use diesel::result::{
+    Error as QueryError,
+    ConnectionError
+};
 
 pub trait PackagesDb {
     fn add_package(&mut self, package: &RemotePackage) -> Result<(), String>;
@@ -59,52 +67,41 @@ struct GetPackage {
 }
 
 impl SqlitePackagesDb {
-    pub fn create_db_file_if_necessary() -> Result<(), String> {
-        trace!("Creating db file if necessary");
-
-        let database_path = Path::new(DATABASE_SOURCE);
-        match database_path.try_exists() {
-            Ok(exists) => {
-                if exists {
-                    return Ok(());
-                }
-
-                trace!("Creating database parent directory");
-
-                // Hardcoded directory allways has parent, unwrap is ok
-                if let Err(error) = fs::create_dir_all(database_path.parent().unwrap()) {
-                    return Err(format!(
-                        "Could not create database's directory/ies:\n{error}"
-                    ));
-                }
-
-                trace!("Creating database file");
-                if let Err(error) = File::create(DATABASE_SOURCE) {
-                    return Err(format!("Could not create database file:\n{error}"));
-                }
-
-                Ok(())
-            }
-            Err(error) => Err(format!("Could not verify if database exists:\n{error}")),
-        }
-    }
-
-    pub fn new() -> Result<SqlitePackagesDb, String> {
+    pub fn new() -> Result<SqlitePackagesDb, ConnectionError> {
         let mut url = String::from("sqlite://");
         url.push_str(DATABASE_SOURCE);
 
         trace!("Establishing SQL connection with source:\n{url}");
 
-        let mut connection = match SqliteConnection::establish(&url) {
-            Ok(connection) => connection,
-            Err(error) => {
-                return Err(format!(
-                    "Could not establish connection to database:\n{error}"
-                ))
-            }
-        };
+        let connection = SqliteConnection::establish(&url)?;
 
-        const CREATE_TABLE_QUERY: &str = "CREATE TABLE IF NOT EXISTS packages (
+        Ok(SqlitePackagesDb { connection })
+    }
+
+    pub fn create_db_file_if_necessary() -> Result<bool, io::Error> {
+        trace!("Creating db file if necessary");
+
+        let database_path = Path::new(DATABASE_SOURCE);
+        match database_path.try_exists()? {
+            true => Ok(false),
+            false => {
+                info!("Database does not exist, creating...");
+
+                trace!("Creating database parent directory");
+
+                // Hardcoded directory allways has parent, unwrap is ok
+                fs::create_dir_all(database_path.parent().unwrap())?;
+
+                trace!("Creating database file");
+                File::create(DATABASE_SOURCE)?;
+
+                Ok(true)
+            }
+        }
+    }
+
+    pub fn initialize_database(&mut self) -> Result<(), QueryError> {
+        const CREATE_TABLE_QUERY: &str = "CREATE TABLE packages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 version TEXT NOT NULL,
@@ -115,11 +112,9 @@ impl SqlitePackagesDb {
 
         trace!("Executing SQL create table query:\n{CREATE_TABLE_QUERY}");
 
-        if let Err(error) = diesel::sql_query(CREATE_TABLE_QUERY).execute(&mut connection) {
-            return Err(format!("Could not execute creat table query:\n{error}"));
-        }
+        diesel::sql_query(CREATE_TABLE_QUERY).execute(&mut self.connection)?;
 
-        Ok(SqlitePackagesDb { connection })
+        Ok(())
     }
 }
 
