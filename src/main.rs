@@ -66,14 +66,18 @@ fn main() {
     const CONFIG_PATH: &str = "/etc/japm/config.json";
 
     if let Err(error) = Config::create_default_config_if_necessary(CONFIG_PATH) {
-        error!("Could not create defaul config if necessary:\n{error}");
+        error!("Could not create default config if necessary:\n{error}");
         exit(-1);
     }
 
     let config = match Config::from_file(CONFIG_PATH) {
         Ok(config) => config,
         Err(error) => {
-            log::error!("Error while attempting to load config:\n{error}");
+            match error {
+                config::Error::IO(error) => error!("Could not parse config due to an IO error: {error}"),
+                config::Error::Json(error) => error!("Could not parse config due to a json eror: {error}"),
+                config::Error::Syntax(error_message) => error!("Could not parse config due to invalid structure/parameters: {error_message}"),
+            }
             exit(-1);
         }
     };

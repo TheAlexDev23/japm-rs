@@ -32,9 +32,10 @@ fn test_config_parsed_correctly() {
 }
 "#;
 
-    let config = Config::from_json(&config).unwrap();
+    let config = Config::from_json(&config);
+    assert!(config.is_ok());
 
-    assert_eq!(config.remotes.get("test").unwrap(), "http://test.com")
+    assert_eq!(config.unwrap().remotes.get("test").unwrap(), "http://test.com")
 }
 
 #[test]
@@ -51,6 +52,7 @@ this is invalid json syntax
     let config = Config::from_json(&config);
 
     assert!(config.is_err());
+    assert!(matches!(config, Err(Error::Json(_))));
 }
 
 #[test]
@@ -60,21 +62,23 @@ fn test_no_remotes_field_rejected() {
     let config = Config::from_json(&config);
 
     assert!(config.is_err());
+    assert!(matches!(config, Err(Error::Syntax(_))));
 }
 
 #[test]
 fn test_non_string_remotes_rejected() {
     let config = r#"
 {
-    "remotes": [
-        "test": {
+    "remotes": {
+        "key with non strign value": {
             "some_non_string_object": "http://test.com"
         }
-    ]
+    }
 }
 "#;
 
     let config = Config::from_json(&config);
 
     assert!(config.is_err());
+    assert!(matches!(config, Err(Error::Syntax(_))));
 }
