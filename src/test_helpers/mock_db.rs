@@ -14,6 +14,10 @@ impl MockPackagesDb {
 }
 
 impl PackagesDb for MockPackagesDb {
+    type AddError = String;
+    type RemoveError = String;
+    type GetError = String;
+
     fn add_package(&mut self, package: &RemotePackage) -> Result<(), String> {
         let local_packge = LocalPackage {
             package_data: package.package_data.clone(),
@@ -40,16 +44,16 @@ impl PackagesDb for MockPackagesDb {
         }
     }
 
-    fn get_package(&mut self, package_name: &str) -> Result<LocalPackage, String> {
+    fn get_package(&mut self, package_name: &str) -> Result<Option<LocalPackage>, String> {
         let package = self
             .installed_packges
             .iter()
             .find(|p| p.package_data.name == package_name);
 
         if let Some(package) = package {
-            Ok(package.clone())
+            Ok(Some(package.clone()))
         } else {
-            Err(String::from("Package not found"))
+            Ok(None)
         }
     }
 

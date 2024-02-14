@@ -5,11 +5,8 @@ use logger::StdLogger;
 
 use clap::{ArgAction, Parser, Subcommand};
 
-use action::Action;
 use config::Config;
 use db::SqlitePackagesDb;
-
-use crate::commands::PackageFinder;
 
 mod action;
 mod commands;
@@ -18,6 +15,9 @@ mod db;
 mod logger;
 mod package;
 mod package_finders;
+
+#[cfg(test)]
+mod test_helpers;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -63,53 +63,43 @@ fn main() {
         }
     };
 
-    const CONFIG_PATH: &str = "/etc/japm/config.json";
+    let config = get_config();
 
-    if let Err(error) = Config::create_default_config_if_necessary(CONFIG_PATH) {
-        error!("Could not create defaul config if necessary:\n{error}");
-        exit(-1);
-    }
-
-    let config = match Config::from_file(CONFIG_PATH) {
-        Ok(config) => config,
-        Err(error) => {
-            log::error!("Error while attempting to load config:\n{error}");
-            exit(-1);
-        }
-    };
-
-    if let Err(error) = SqlitePackagesDb::create_db_file_if_necessary() {
-        error!("Could not create db file if necessary:\n{error}");
-        exit(-1);
-    }
-
-    let mut db = match SqlitePackagesDb::new() {
-        Ok(db) => db,
-        Err(error) => {
-            log::error!("Error while attempting to get installed packages database:\n{error}");
-            exit(-1);
-        }
-    };
+    let mut db = get_db();
 
     if let Some(command) = args.command {
-        let result: Result<Vec<Action>, String> = match command {
+        let result: Result<Vec<action::Action>, String> = match command {
             CommandType::Install {
                 from_file,
                 reinstall,
                 packages,
             } => {
-                let finder: Box<dyn PackageFinder> = if from_file {
-                    Box::new(package_finders::FromFilePackageFinder)
+                // Depending on the error of the package_finder install_packages returns different Result types
+                // This makes it hard to call both of these functions in a non boilerplate way. This seems like
+                // the one that less code uses. Altough it does get rid of the error itself and just gets it's string
+                // version to print out later. This can be an issue for future implementations.
+                if from_file {
+                    commands::install_packages(
+                        packages,
+                        &package_finders::FromFilePackageFinder,
+                        reinstall,
+                        &mut db,
+                    )
+                    .map_err(|e| e.to_string())
                 } else {
-                    Box::new(package_finders::RemotePackageFinder::new(&config))
-                };
-
-                commands::install_packages(packages, &*finder, reinstall, &mut db)
+                    commands::install_packages(
+                        packages,
+                        &package_finders::RemotePackageFinder::new(&config),
+                        reinstall,
+                        &mut db,
+                    )
+                    .map_err(|e| e.to_string())
+                }
             }
             CommandType::Remove {
                 packages,
                 recursive,
-            } => commands::remove_packages(packages, recursive, &mut db),
+            } => commands::remove_packages(packages, recursive, &mut db).map_err(|e| e.to_string()),
             _ => todo!("Command is unsupported"),
         };
 
@@ -118,8 +108,8 @@ fn main() {
                 trace!("Performing actions:\n{actions:#?}");
                 for action in actions {
                     trace!("Commiting action {action}");
-                    if let Err(error_message) = action.commit(&mut db) {
-                        error!("Could not commit action:\n{error_message}");
+                    if let Err(error) = action.commit(&mut db) {
+                        error!("Could not commit action:\n{error}");
                     } else {
                         trace!("Commited action");
                     }
@@ -129,6 +119,60 @@ fn main() {
                 error!("Error while performing command:\n{error_message}");
                 exit(-1);
             }
+        }
+    }
+}
+
+fn get_config() -> Config {
+    const CONFIG_PATH: &str = "/etc/japm/config.json";
+
+    match Config::create_default_config_if_necessary(CONFIG_PATH) {
+        Ok(created) => {
+            if created {
+                if let Err(error) = Config::write_default_config(CONFIG_PATH) {
+                    error!("Could not write default config: {error}");
+                    exit(-1);
+                }
+            }
+        }
+        Err(error) => {
+            error!("Could not create default config if necessary: {error}");
+            exit(-1);
+        }
+    }
+
+    match Config::from_file(CONFIG_PATH) {
+        Ok(config) => config,
+        Err(error) => {
+            error!("Could not get config: {error}");
+            exit(-1);
+        }
+    }
+}
+
+fn get_db() -> SqlitePackagesDb {
+    match SqlitePackagesDb::create_db_file_if_necessary() {
+        Ok(created) => {
+            let mut db = match SqlitePackagesDb::new() {
+                Ok(db) => db,
+                Err(error) => {
+                    error!("Could not connect to the database: {error}");
+                    exit(-1);
+                }
+            };
+
+            if created {
+                if let Err(error) = db.initialize_database() {
+                    error!("Could not initialize database: {error}");
+                    exit(-1);
+                }
+            }
+
+            db
+        }
+        Err(error) => {
+            error!("Could not create db file if necessary: {error}");
+            exit(-1);
         }
     }
 }

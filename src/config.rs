@@ -1,6 +1,11 @@
+use std::collections::HashMap;
+use std::fs;
+use std::io;
+use std::path::Path;
+
 use serde_json::Value as JsonValue;
 
-use std::{collections::HashMap, fs, path::Path};
+use thiserror::Error;
 
 use log::trace;
 
@@ -18,70 +23,58 @@ const DEFAULT_CONFIG: &str = r#"
     }
 }"#;
 
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("An IO error has occured: {0}")]
+    IO(#[from] io::Error),
+    #[error("A json parsing error has occured: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("The config file has invalid json syntax: {0}")]
+    Syntax(String),
+}
+
 impl Config {
-    pub fn create_default_config_if_necessary(config_path: &str) -> Result<(), String> {
-        trace!("Creating defalt configs if necessary");
+    pub fn create_default_config_if_necessary(config_path: &str) -> Result<bool, io::Error> {
+        trace!("Creating default configs if necessary");
 
         let config_path = Path::new(config_path);
 
-        match config_path.try_exists() {
-            Ok(exists) => {
-                if exists {
-                    return Ok(());
-                }
+        match config_path.try_exists()? {
+            true => Ok(false),
+            false => {
+                trace!("Creating config file parent directories.");
+                fs::create_dir_all(config_path.parent().unwrap())?;
 
-                trace!("Config file does not exist. Creating new...");
+                trace!("Creating config file.");
+                fs::File::create(config_path)?;
 
-                trace!("Creating config parent directories.");
-
-                if let Err(error) = fs::create_dir_all(config_path.parent().unwrap()) {
-                    return Err(format!(
-                        "Could not create remotes config directory recursively:\n{error}"
-                    ));
-                }
-
-                trace!("Creating and writing to config file.");
-
-                if let Err(error) = fs::write(config_path, DEFAULT_CONFIG) {
-                    Err(format!("Could not write default remotes config:\n{error}"))
-                } else {
-                    Ok(())
-                }
+                Ok(true)
             }
-            Err(error) => Err(format!(
-                "Could not verify if {} exists:\n{error}",
-                config_path.to_str().unwrap()
-            )),
         }
     }
 
-    pub fn from_file(config_path: &str) -> Result<Config, String> {
+    pub fn write_default_config(config_path: &str) -> Result<(), io::Error> {
+        fs::write(config_path, DEFAULT_CONFIG)
+    }
+
+    pub fn from_file(config_path: &str) -> Result<Config, Error> {
         trace!("Parsing configs");
 
-        let config_content = match fs::read_to_string(config_path) {
-            Ok(content) => content,
-            Err(error) => return Err(format!("Error while reading remotes config\n:{error}")),
-        };
+        let config_content = fs::read_to_string(config_path)?;
 
         Self::from_json(&config_content)
     }
 
-    pub fn from_json(json_content: &str) -> Result<Config, String> {
+    pub fn from_json(json_content: &str) -> Result<Config, Error> {
         Ok(Config {
-            remotes: match Self::get_remotes_from_config(json_content) {
-                Ok(remotes) => remotes,
-                Err(error) => return Err(format!("Could not get remotes:\n{error}")),
-            },
+            remotes: Self::get_remotes_from_config(json_content)?,
         })
     }
 
-    fn get_remotes_from_config(config_content: &str) -> Result<HashMap<String, String>, String> {
+    fn get_remotes_from_config(config_content: &str) -> Result<HashMap<String, String>, Error> {
         trace!("Parsing config for remotes.");
 
-        let root: JsonValue = match serde_json::from_str(config_content) {
-            Ok(json_value) => json_value,
-            Err(error) => return Err(format!("Error parsing remotes config:\n{error}")),
-        };
+        let root: JsonValue = serde_json::from_str(config_content)?;
 
         match root.get("remotes") {
             Some(remotes) => match remotes.as_object() {
@@ -91,17 +84,19 @@ impl Config {
                         if let JsonValue::String(url) = value {
                             return_map.insert(key.clone(), url.clone());
                         } else {
-                            return Err(String::from(
+                            return Err(Error::Syntax(String::from(
                                 "All keys and values in \"remotes\" should be strings",
-                            ));
+                            )));
                         }
                     }
 
                     Ok(return_map)
                 }
-                None => Err(String::from("Could not get remotes as map.")),
+                None => Err(Error::Syntax(String::from(
+                    "Remotes needs to be json object.",
+                ))),
             },
-            None => Err(String::from("No remotes found in config")),
+            None => Err(Error::Syntax(String::from("Config has no remotes object."))),
         }
     }
 }

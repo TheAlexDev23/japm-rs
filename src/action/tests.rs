@@ -4,9 +4,7 @@ use super::*;
 
 use crate::package::{PackageData, RemotePackage};
 
-use mock_db::MockPackagesDb;
-
-mod mock_db;
+use crate::test_helpers::MockPackagesDb;
 
 #[test]
 fn test_package_installs() {
@@ -30,16 +28,14 @@ fn test_package_removes() {
 
     let package_name = remote_package.package_data.name.clone();
 
-    mock_db
-        .add_package(&remote_package)
-        .expect("Could not add package to mock db");
+    mock_db.add_package(&remote_package).unwrap();
 
-    let local_package = mock_db.get_package(&package_name).unwrap();
+    let local_package = mock_db.get_package(&package_name).unwrap().unwrap();
 
     let action = Action::Remove(local_package);
 
     assert!(action.commit(&mut mock_db).is_ok());
-    assert!(mock_db.get_package(&package_name).is_err());
+    assert!(mock_db.get_package(&package_name).unwrap().is_none());
 }
 
 fn get_mock_remote_package() -> RemotePackage {
