@@ -76,7 +76,8 @@ fn main() {
             } => {
                 // Depending on the error of the package_finder install_packages returns different Result types
                 // This makes it hard to call both of these functions in a non boilerplate way. This seems like
-                // the one that less code uses
+                // the one that less code uses. Altough it does get rid of the error itself and just gets it's string
+                // version to print out later. This can be an issue for future implementations.
                 if from_file {
                     commands::install_packages(
                         packages,
@@ -129,13 +130,13 @@ fn get_config() -> Config {
         Ok(created) => {
             if created {
                 if let Err(error) = Config::write_default_config(CONFIG_PATH) {
-                    error!("Could not write default config:\n{error}");
+                    error!("Could not write default config: {error}");
                     exit(-1);
                 }
             }
         }
         Err(error) => {
-            error!("Could not create default config if necessary:\n{error}");
+            error!("Could not create default config if necessary: {error}");
             exit(-1);
         }
     }
@@ -143,17 +144,7 @@ fn get_config() -> Config {
     match Config::from_file(CONFIG_PATH) {
         Ok(config) => config,
         Err(error) => {
-            match error {
-                config::Error::IO(error) => {
-                    error!("Could not parse config due to an IO error: {error}")
-                }
-                config::Error::Json(error) => {
-                    error!("Could not parse config due to a json eror: {error}")
-                }
-                config::Error::Syntax(error_message) => error!(
-                    "Could not parse config due to invalid structure/parameters: {error_message}"
-                ),
-            }
+            error!("Could not get config: {error}");
             exit(-1);
         }
     }
@@ -165,14 +156,14 @@ fn get_db() -> SqlitePackagesDb {
             let mut db = match SqlitePackagesDb::new() {
                 Ok(db) => db,
                 Err(error) => {
-                    error!("Could not connect to database:\n{error}");
+                    error!("Could not connect to the database: {error}");
                     exit(-1);
                 }
             };
 
             if created {
                 if let Err(error) = db.initialize_database() {
-                    error!("Could not initialize database:\n{error}");
+                    error!("Could not initialize database: {error}");
                     exit(-1);
                 }
             }
@@ -180,7 +171,7 @@ fn get_db() -> SqlitePackagesDb {
             db
         }
         Err(error) => {
-            error!("Could not create db file if necessary:\n{error}");
+            error!("Could not create db file if necessary: {error}");
             exit(-1);
         }
     }

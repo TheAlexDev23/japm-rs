@@ -1,10 +1,13 @@
+use std::collections::HashMap;
+use std::fmt;
+use std::fmt::Display;
+use std::fs;
+use std::io;
+use std::path::Path;
+
 use serde_json::Value as JsonValue;
 
-use std::fs;
-use std::collections::HashMap;
-use std::path::Path;
-use std::io::{self};
-use std::fmt::{self, Display};
+use thiserror::Error;
 
 use log::trace;
 
@@ -22,32 +25,15 @@ const DEFAULT_CONFIG: &str = r#"
     }
 }"#;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    IO(io::Error),
-    Json(serde_json::Error),
+    #[error("An IO error has occured: {0}")]
+    IO(#[from] io::Error),
+    #[error("A json parsing error has occured: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("The config file has invalid json syntax: {0}")]
     Syntax(String),
 }
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
-        match self {
-            Error::IO(error) => write!(f, "{error}"),
-            Error::Json(error) => write!(f, "{error}"),
-            Error::Syntax(error_message) => write!(f, "{error_message}"),
-        }
-    }
-}
-impl From<io::Error> for Error {
-    fn from(other: io::Error) -> Self {
-        Error::IO(other)
-    }
-}
-impl From<serde_json::Error> for Error {
-    fn from(other: serde_json::Error) -> Self {
-        Error::Json(other)
-    }
-}
-
 
 impl Config {
     pub fn create_default_config_if_necessary(config_path: &str) -> Result<bool, io::Error> {
@@ -108,7 +94,9 @@ impl Config {
 
                     Ok(return_map)
                 }
-                None => Err(Error::Syntax(String::from("Remotes needs to be json object."))),
+                None => Err(Error::Syntax(String::from(
+                    "Remotes needs to be json object.",
+                ))),
             },
             None => Err(Error::Syntax(String::from("Config has no remotes object."))),
         }
