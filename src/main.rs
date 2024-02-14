@@ -74,6 +74,9 @@ fn main() {
                 reinstall,
                 packages,
             } => {
+                // Depending on the error of the package_finder install_packages returns different Result types
+                // This makes it hard to call both of these functions in a non boilerplate way. This seems like
+                // the one that less code uses
                 if from_file {
                     commands::install_packages(
                         packages,
@@ -104,8 +107,8 @@ fn main() {
                 trace!("Performing actions:\n{actions:#?}");
                 for action in actions {
                     trace!("Commiting action {action}");
-                    if let Err(error_message) = action.commit(&mut db) {
-                        error!("Could not commit action:\n{error_message}");
+                    if let Err(error) = action.commit(&mut db) {
+                        error!("Could not commit action:\n{error}");
                     } else {
                         trace!("Commited action");
                     }

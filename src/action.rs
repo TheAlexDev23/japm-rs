@@ -1,5 +1,10 @@
+use std::fmt::Display;
+use std::io;
+use std::process::Command;
+
 use log::{debug, trace, warn};
-use std::{fmt::Display, process::Command};
+
+use thiserror::Error;
 
 use crate::db::PackagesDb;
 use crate::package::{LocalPackage, RemotePackage};
@@ -12,7 +17,6 @@ pub enum Action {
     Install(RemotePackage),
     Remove(LocalPackage),
 }
-
 impl Display for Action {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -22,8 +26,32 @@ impl Display for Action {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum Error<EDatabaseAdd: Display, EDatabaseRemove: Display> {
+    #[error("Could not parse command: {0}")]
+    Parse(#[from] shell_words::ParseError),
+
+    #[error("Could not read output: {0}")]
+    IO(#[from] io::Error),
+
+    #[error("Command {0} is invalid: {0}")]
+    InvalidCommand(String, String),
+
+    #[error("Command {0} failed with exit code {1} and stderr:\n{2}")]
+    CommandFail(String, i32, String),
+
+    #[error("Failed to add package to database:\n{0}")]
+    DatabaseAdd(EDatabaseAdd),
+
+    #[error("Failed to remove package from database:\n{0}")]
+    DatabaseRemove(EDatabaseRemove),
+}
+
 impl Action {
-    pub fn commit(self, db: &mut impl PackagesDb) -> Result<(), String> {
+    pub fn commit<EDatabaseAdd: Display, EDatabaseRemove: Display>(
+        self,
+        db: &mut impl PackagesDb<AddError = EDatabaseAdd, RemoveError = EDatabaseRemove>,
+    ) -> Result<(), Error<EDatabaseAdd, EDatabaseRemove>> {
         debug!("Action commit {self}");
         let command_iter = match self {
             Action::Install(ref package) => package.install.iter(),
@@ -32,30 +60,24 @@ impl Action {
 
         for command in command_iter {
             debug!("Running command {command}");
-            match run_command(command) {
-                Ok((stdout, stderr)) => {
-                    if !stdout.is_empty() {
-                        debug!("out: {stdout}");
-                    }
-                    if !stderr.is_empty() {
-                        warn!("err: {stderr}");
-                    }
-                }
-                Err(error) => {
-                    return Err(format!("Error while commiting action {}:\n{error}", self))
-                }
+            let (stdout, stderr) = run_command(command)?;
+            if !stdout.is_empty() {
+                debug!("out: {stdout}");
+            }
+            if !stderr.is_empty() {
+                warn!("err: {stderr}");
             }
         }
 
         match self {
             Action::Install(package) => {
                 if let Err(error) = db.add_package(&package) {
-                    return Err(format!("Could not add package to local database:\n{error}"));
+                    return Err(Error::DatabaseAdd(error));
                 }
             }
             Action::Remove(package) => {
                 if let Err(error) = db.remove_package(&package.package_data.name) {
-                    return Err(format!("Could not remove package from database:\n{error}"));
+                    return Err(Error::DatabaseRemove(error));
                 }
             }
         };
@@ -64,44 +86,44 @@ impl Action {
     }
 }
 
-fn run_command(command: &str) -> Result<(String, String), String> {
-    match shell_words::split(command) {
-        Ok(args) => {
-            if args.is_empty() {
-                return Err(String::from(
-                    "Error while attempting to run command. Cannot contain 0 arguments.",
-                ));
-            }
+fn run_command<EDatabaseAdd: Display, EDatabaseRemove: Display>(
+    command: &str,
+) -> Result<(String, String), Error<EDatabaseAdd, EDatabaseRemove>> {
+    let args = shell_words::split(command)?;
+    if args.is_empty() {
+        return Err(Error::InvalidCommand(
+            String::from(command),
+            String::from("Cannot have 0 arguments"),
+        ));
+    }
 
-            trace!("Command as arguments: {args:?}");
+    trace!("Command as arguments: {args:?}");
 
-            let mut args_iter = args.iter();
+    let mut args_iter = args.iter();
 
-            let mut command = Command::new(args_iter.next().unwrap());
+    let mut command_proc = Command::new(args_iter.next().unwrap());
 
-            for arg in args_iter {
-                command.arg(arg);
-            }
+    for arg in args_iter {
+        command_proc.arg(arg);
+    }
 
-            match command.output() {
-                Ok(result) => {
-                    if !result.status.success() {
-                        match result.status.code() {
-                            Some(code) => {
-                                return Err(format!("Command failed with exit code {}", code))
-                            }
-                            None => return Err(String::from("Command failed without exit code")),
-                        }
-                    }
+    let result = command_proc.output()?;
 
-                    Ok((
-                        String::from_utf8_lossy(&result.stdout).to_string(),
-                        String::from_utf8_lossy(&result.stderr).to_string(),
-                    ))
-                }
-                Err(error) => Err(format!("Error while running command:\n{error}")),
+    let stdout = String::from_utf8_lossy(&result.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&result.stderr).to_string();
+
+    if !result.status.success() {
+        match result.status.code() {
+            Some(code) => return Err(Error::CommandFail(String::from(command), code, stderr)),
+            None => {
+                return Err(Error::CommandFail(
+                    String::from(command),
+                    80085,
+                    String::from("Command failed but could not get the status code."),
+                ))
             }
         }
-        Err(error) => Err(format!("Error while parsing command arguments:\n{error}")),
     }
+
+    Ok((stdout, stderr))
 }
