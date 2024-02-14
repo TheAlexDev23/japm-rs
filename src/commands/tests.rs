@@ -16,6 +16,7 @@ fn test_install_simple_package_actions_generated_succesfully() {
         vec![remote_package.package_data.name.clone()],
         &package_finder,
         false,
+        false,
         &mut mock_db,
     );
 
@@ -33,6 +34,7 @@ fn test_installed_package_is_ignored() {
     let install_result = commands::install_packages(
         vec![remote_package.package_data.name.clone()],
         &package_finder,
+        false,
         false,
         &mut mock_db,
     );
@@ -56,6 +58,7 @@ fn test_installed_package_is_reinstalled() {
     let install_result = commands::install_packages(
         vec![remote_package.package_data.name.clone()],
         &package_finder,
+        false,
         true,
         &mut mock_db,
     );

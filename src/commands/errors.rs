@@ -20,3 +20,13 @@ pub enum RemoveError<EDatabase: Display> {
     #[error("Could not get package from databae: {0}")]
     DatabaseGet(EDatabase),
 }
+
+#[derive(Error, Debug, PartialEq)]
+pub enum UpdateError<EDatabase: Display, EFind: Display> {
+    #[error("Could not get package from databae: {0}")]
+    DatabaseGet(EDatabase),
+    #[error("Could not generate actions to remove packages: {0}")]
+    Remove(#[from] RemoveError<EDatabase>),
+    #[error("Could not generate actions to install packages: {0}")]
+    Install(#[from] InstallError<EDatabase, EFind>),
+}

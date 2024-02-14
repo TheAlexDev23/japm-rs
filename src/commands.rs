@@ -4,7 +4,7 @@ use log::{debug, info, trace};
 
 use crate::action::Action;
 use crate::db::PackagesDb;
-use crate::package::RemotePackage;
+use crate::package::{LocalPackage, RemotePackage};
 
 pub use errors::*;
 
@@ -23,10 +23,12 @@ pub trait PackageFinder {
     fn find_package(&self, package_name: &str) -> Result<Option<RemotePackage>, Self::Error>;
 }
 
+// TODO: migrate update and force_reinstall to enum
 pub fn install_packages<EFind: Display, EDatabase: Display>(
     packages: Vec<String>,
     package_finder: &impl PackageFinder<Error = EFind>,
-    reinstall: bool,
+    update: bool,
+    force_reinstall: bool,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<Vec<Action>, InstallError<EDatabase, EFind>> {
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
@@ -35,7 +37,8 @@ pub fn install_packages<EFind: Display, EDatabase: Display>(
         actions.extend(install_package(
             package_name,
             package_finder,
-            reinstall,
+            update,
+            force_reinstall,
             db,
         )?);
     }
@@ -57,10 +60,40 @@ pub fn remove_packages<EDatabase: Display>(
     Ok(actions.keys().cloned().collect())
 }
 
+pub fn update_packages<EDatabase: Display, EFind: Display>(
+    package_names: Vec<String>,
+    package_finder: &impl PackageFinder<Error = EFind>,
+    db: &mut impl PackagesDb<GetError = EDatabase>,
+) -> Result<Vec<Action>, UpdateError<EDatabase, EFind>> {
+    let mut actions: Vec<Action> = Vec::new();
+    for package_name in package_names.into_iter() {
+        let depending = match get_depending(&package_name, db, -1) {
+            Ok(depending) => depending,
+            Err(error) => return Err(UpdateError::DatabaseGet(error)),
+        };
+
+        let mut packages_to_update: Vec<String> =
+            depending.into_iter().map(|p| p.package_data.name).collect();
+
+        packages_to_update.push(String::from(package_name));
+
+        actions.extend(install_packages(
+            packages_to_update,
+            package_finder,
+            true,
+            false,
+            db,
+        )?);
+    }
+
+    Ok(actions)
+}
+
 fn install_package<EFind: Display, EDatabase: Display>(
     package_name: &str,
     package_finder: &impl PackageFinder<Error = EFind>,
-    reinstall: bool,
+    update: bool,
+    force_reinstall: bool,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<LinkedHashSet<Action>, InstallError<EDatabase, EFind>> {
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
@@ -69,7 +102,8 @@ fn install_package<EFind: Display, EDatabase: Display>(
     match db.get_package(package_name) {
         Ok(package) => {
             if let Some(package) = package {
-                if reinstall {
+                // TODO: Only reinstall if remote version is newer if update and not force_reinstall is given
+                if update || force_reinstall {
                     info!("Package {package_name} already installed, reinstalling...");
                     // It's also possible to call remove_package and get the packge removal specific actions.
                     // But this can cause issues.
@@ -99,7 +133,13 @@ fn install_package<EFind: Display, EDatabase: Display>(
 
     trace!("Found remote package:\n{package:#?}");
     for dependency in package.dependencies.iter() {
-        actions.extend(install_package(dependency, package_finder, reinstall, db)?);
+        actions.extend(install_package(
+            dependency,
+            package_finder,
+            update,
+            force_reinstall,
+            db,
+        )?);
     }
 
     actions.insert(Action::Install(package), ());
@@ -126,33 +166,31 @@ fn remove_package<EDatabase: Display>(
         Err(error) => return Err(RemoveError::DatabaseGet(error)),
     };
 
-    match db.get_depending_packages(package_name) {
-        Ok(depending_packages) => {
-            if !depending_packages.is_empty() {
-                if recursive {
-                    info!("Found depending packages, uninstalling...");
-                    for dependency in depending_packages.iter() {
-                        actions.extend(remove_package(
-                            &dependency.package_data.name,
-                            recursive,
-                            db,
-                        )?);
-                    }
-                } else {
-                    let depending_packages: Vec<String> = depending_packages
-                        .into_iter()
-                        .map(|p| p.package_data.name)
-                        .collect();
+    let depending_packages = match get_depending(package_name, db, 1) {
+        Ok(depending) => depending,
+        Err(error) => return Err(RemoveError::DatabaseGet(error)),
+    };
 
-                    return Err(RemoveError::DependencyBreak(
-                        String::from(package_name),
-                        depending_packages,
-                    ));
-                }
+    if !depending_packages.is_empty() {
+        if recursive {
+            info!("Found depending packages, uninstalling...");
+            for dependency in depending_packages.iter() {
+                actions.extend(remove_package(
+                    &dependency.package_data.name,
+                    recursive,
+                    db,
+                )?);
             }
-        }
-        Err(error) => {
-            return Err(RemoveError::DatabaseGet(error));
+        } else {
+            let depending_packages: Vec<String> = depending_packages
+                .into_iter()
+                .map(|p| p.package_data.name)
+                .collect();
+
+            return Err(RemoveError::DependencyBreak(
+                String::from(package_name),
+                depending_packages,
+            ));
         }
     }
 
@@ -161,4 +199,42 @@ fn remove_package<EDatabase: Display>(
     actions.insert(action, ());
 
     Ok(actions)
+}
+
+fn get_depending<EDatabase: Display>(
+    package_name: &str,
+    db: &mut impl PackagesDb<GetError = EDatabase>,
+    max_level: i32,
+) -> Result<Vec<LocalPackage>, EDatabase> {
+    Ok(get_depending_recursive(package_name, db, 0, max_level)?
+        .keys()
+        .cloned()
+        .collect())
+}
+fn get_depending_recursive<EDatabase: Display>(
+    package_name: &str,
+    db: &mut impl PackagesDb<GetError = EDatabase>,
+    level: i32,
+    max_level: i32,
+) -> Result<LinkedHashSet<LocalPackage>, EDatabase> {
+    if level == max_level {
+        return Ok(LinkedHashSet::new());
+    }
+
+    let mut result = LinkedHashSet::new();
+
+    let depending = db.get_depending_packages(package_name)?;
+
+    for package in depending.into_iter() {
+        result.extend(get_depending_recursive(
+            &package.package_data.name,
+            db,
+            level + 1,
+            max_level,
+        )?);
+
+        result.insert(package, ());
+    }
+
+    Ok(result)
 }

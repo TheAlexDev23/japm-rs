@@ -82,6 +82,7 @@ fn main() {
                     commands::install_packages(
                         packages,
                         &package_finders::FromFilePackageFinder,
+                        false,
                         reinstall,
                         &mut db,
                     )
@@ -90,6 +91,7 @@ fn main() {
                     commands::install_packages(
                         packages,
                         &package_finders::RemotePackageFinder::new(&config),
+                        false,
                         reinstall,
                         &mut db,
                     )
@@ -100,6 +102,12 @@ fn main() {
                 packages,
                 recursive,
             } => commands::remove_packages(packages, recursive, &mut db).map_err(|e| e.to_string()),
+            CommandType::Update { packages } => commands::update_packages(
+                packages,
+                &package_finders::RemotePackageFinder::new(&config),
+                &mut db,
+            )
+            .map_err(|e| e.to_string()),
             _ => todo!("Command is unsupported"),
         };
 
