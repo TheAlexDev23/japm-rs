@@ -75,7 +75,7 @@ pub fn update_packages<EDatabase: Display, EFind: Display>(
         let mut packages_to_update: Vec<String> =
             depending.into_iter().map(|p| p.package_data.name).collect();
 
-        packages_to_update.push(String::from(package_name));
+        packages_to_update.push(package_name);
 
         actions.extend(install_packages(
             packages_to_update,
