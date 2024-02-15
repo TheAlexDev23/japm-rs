@@ -65,6 +65,22 @@ pub fn remove_packages<EDatabase: Display>(
     Ok(actions.keys().cloned().collect())
 }
 
+pub fn update_all_packages<EDatabase: Display, EFind: Display>(
+    package_finder: &impl PackageFinder<Error = EFind>,
+    db: &mut impl PackagesDb<GetError = EDatabase>,
+) -> Result<Vec<Action>, UpdateError<EDatabase, EFind>> {
+    let packages = match db.get_all_packages() {
+        Ok(packages) => packages,
+        Err(error) => return Err(UpdateError::DatabaseGet(error)),
+    };
+
+    let packages = packages.into_iter().map(|p| p.package_data.name).collect();
+
+    let actions = install_packages(packages, package_finder, &ReinstallOptions::Update, db)?;
+
+    Ok(actions)
+}
+
 pub fn update_packages<EDatabase: Display, EFind: Display>(
     package_names: Vec<String>,
     package_finder: &impl PackageFinder<Error = EFind>,

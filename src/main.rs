@@ -44,6 +44,8 @@ enum CommandType {
         packages: Vec<String>,
     },
     Update {
+        #[arg(short, long, action=ArgAction::SetTrue)]
+        system: bool,
         packages: Vec<String>,
     },
     Info {
@@ -106,11 +108,20 @@ fn main() {
                 packages,
                 recursive,
             } => commands::remove_packages(packages, recursive, &mut db).map_err(|e| e.to_string()),
-            CommandType::Update { packages } => commands::update_packages(
-                packages,
-                &package_finders::RemotePackageFinder::new(&config),
-                &mut db,
-            )
+            CommandType::Update { system, packages } => {
+                if system {
+                    commands::update_all_packages(
+                        &package_finders::RemotePackageFinder::new(&config),
+                        &mut db,
+                    )
+                } else {
+                    commands::update_packages(
+                        packages,
+                        &package_finders::RemotePackageFinder::new(&config),
+                        &mut db,
+                    )
+                }
+            }
             .map_err(|e| e.to_string()),
             _ => todo!("Command is unsupported"),
         };
