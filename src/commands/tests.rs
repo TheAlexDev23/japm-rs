@@ -9,12 +9,12 @@ mod mock_package_finder;
 
 #[test]
 fn test_install_actions_generated_succesfully() {
-    let (mut mock_db, package_finder) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
     let install_result = commands::install_packages(
         vec![remote_package.package_data.name.clone()],
-        &package_finder,
+        &mut package_finder,
         &ReinstallOptions::Ignore,
         &mut mock_db,
     );
@@ -22,10 +22,9 @@ fn test_install_actions_generated_succesfully() {
     assert_actions(install_result, vec![Action::Install(remote_package)]);
 }
 
-
 #[test]
 fn test_remove_package_actions_generated_succesfully() {
-    let (mut mock_db, package_finder) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
     let local_package = mock_install(&mut mock_db, &remote_package);
@@ -38,14 +37,14 @@ fn test_remove_package_actions_generated_succesfully() {
 
 #[test]
 fn test_installed_package_is_ignored() {
-    let (mut mock_db, package_finder) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
     mock_install(&mut mock_db, &remote_package);
 
     let install_result = commands::install_packages(
         vec![remote_package.package_data.name.clone()],
-        &package_finder,
+        &mut package_finder,
         &ReinstallOptions::Ignore,
         &mut mock_db,
     );
@@ -67,7 +66,7 @@ fn test_installed_package_is_updated() {
 
     let install_result = commands::install_packages(
         vec![package_name],
-        &package_finder,
+        &mut package_finder,
         &ReinstallOptions::Update,
         &mut mock_db,
     );
@@ -83,14 +82,14 @@ fn test_installed_package_is_updated() {
 
 #[test]
 fn test_latest_ver_installed_package_is_ignored() {
-    let (mut mock_db, package_finder) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
     mock_install(&mut mock_db, &remote_package);
 
     let install_result = commands::install_packages(
         vec![remote_package.package_data.name.clone()],
-        &package_finder,
+        &mut package_finder,
         &ReinstallOptions::Update,
         &mut mock_db,
     );
@@ -100,14 +99,14 @@ fn test_latest_ver_installed_package_is_ignored() {
 
 #[test]
 fn test_installed_package_is_reinstalled() {
-    let (mut mock_db, package_finder) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
     let local_package = mock_install(&mut mock_db, &remote_package);
 
     let install_result = commands::install_packages(
         vec![remote_package.package_data.name.clone()],
-        &package_finder,
+        &mut package_finder,
         &ReinstallOptions::ForceReinstall,
         &mut mock_db,
     );
@@ -123,7 +122,7 @@ fn test_installed_package_is_reinstalled() {
 
 #[test]
 fn test_remove_package_with_depending_packages_is_not_allowed() {
-    let (mut mock_db, package_finder) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let package_with_dependency = package_finder.get_package_with_dependency();
     let package_dependency = package_finder
         .find_package(&package_with_dependency.dependencies[0])
@@ -148,7 +147,7 @@ fn test_remove_package_with_depending_packages_is_not_allowed() {
 
 #[test]
 fn test_remove_package_removes_depending() {
-    let (mut mock_db, package_finder) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let package_with_dependency = package_finder.get_package_with_dependency();
     let package_dependency = package_finder
         .find_package(&package_with_dependency.dependencies[0])
@@ -175,7 +174,6 @@ fn test_remove_package_removes_depending() {
         ],
     );
 }
-
 
 fn assert_actions<Error: std::fmt::Debug>(
     result: Result<Vec<Action>, Error>,

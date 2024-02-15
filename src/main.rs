@@ -1,5 +1,6 @@
 use std::process::exit;
 
+use default_package_finder::DefaultPackageFinder;
 use log::{error, trace};
 use logger::StdLogger;
 
@@ -12,9 +13,9 @@ mod action;
 mod commands;
 mod config;
 mod db;
+mod default_package_finder;
 mod logger;
 mod package;
-mod package_finders;
 
 #[cfg(test)]
 mod test_helpers;
@@ -82,44 +83,26 @@ fn main() {
                     commands::ReinstallOptions::Ignore
                 };
 
-                // Depending on the error of the package_finder install_packages returns different Result types
-                // This makes it hard to call both of these functions in a non boilerplate way. This seems like
-                // the one that less code uses. Altough it does get rid of the error itself and just gets it's string
-                // version to print out later. This can be an issue for future implementations.
-                if from_file {
-                    commands::install_packages(
-                        packages,
-                        &package_finders::FromFilePackageFinder,
-                        &reinstall_options,
-                        &mut db,
-                    )
-                    .map_err(|e| e.to_string())
-                } else {
-                    commands::install_packages(
-                        packages,
-                        &package_finders::RemotePackageFinder::new(&config),
-                        &reinstall_options,
-                        &mut db,
-                    )
-                    .map_err(|e| e.to_string())
-                }
+                let mut package_finder = DefaultPackageFinder::new(from_file, &config);
+
+                commands::install_packages(
+                    packages,
+                    &mut package_finder,
+                    &reinstall_options,
+                    &mut db,
+                )
+                .map_err(|e| e.to_string())
             }
             CommandType::Remove {
                 packages,
                 recursive,
             } => commands::remove_packages(packages, recursive, &mut db).map_err(|e| e.to_string()),
             CommandType::Update { system, packages } => {
+                let mut package_finder = DefaultPackageFinder::new(false, &config);
                 if system {
-                    commands::update_all_packages(
-                        &package_finders::RemotePackageFinder::new(&config),
-                        &mut db,
-                    )
+                    commands::update_all_packages(&mut package_finder, &mut db)
                 } else {
-                    commands::update_packages(
-                        packages,
-                        &package_finders::RemotePackageFinder::new(&config),
-                        &mut db,
-                    )
+                    commands::update_packages(packages, &mut package_finder, &mut db)
                 }
             }
             .map_err(|e| e.to_string()),

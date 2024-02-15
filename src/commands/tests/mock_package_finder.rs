@@ -11,7 +11,7 @@ pub struct MockPackageFinder {
 impl PackageFinder for MockPackageFinder {
     type Error = String;
 
-    fn find_package(&self, package_name: &str) -> Result<Option<RemotePackage>, String> {
+    fn find_package(&mut self, package_name: &str) -> Result<Option<RemotePackage>, String> {
         Ok(self.packages_db.get(&String::from(package_name)).cloned())
     }
 }
@@ -54,11 +54,11 @@ impl MockPackageFinder {
             .version = String::from("0.0.2");
     }
 
-    pub fn get_simple_packge(&self) -> RemotePackage {
+    pub fn get_simple_packge(&mut self) -> RemotePackage {
         self.find_package("simple_package").unwrap().unwrap()
     }
 
-    pub fn get_package_with_dependency(&self) -> RemotePackage {
+    pub fn get_package_with_dependency(&mut self) -> RemotePackage {
         self.find_package("package_with_dependency")
             .unwrap()
             .unwrap()

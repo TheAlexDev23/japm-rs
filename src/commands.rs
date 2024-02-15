@@ -21,7 +21,7 @@ mod tests;
 
 pub trait PackageFinder {
     type Error: Display;
-    fn find_package(&self, package_name: &str) -> Result<Option<RemotePackage>, Self::Error>;
+    fn find_package(&mut self, package_name: &str) -> Result<Option<RemotePackage>, Self::Error>;
 }
 
 pub enum ReinstallOptions {
@@ -30,10 +30,9 @@ pub enum ReinstallOptions {
     Ignore,
 }
 
-// TODO: migrate update and force_reinstall to enum
 pub fn install_packages<EFind: Display, EDatabase: Display>(
     packages: Vec<String>,
-    package_finder: &impl PackageFinder<Error = EFind>,
+    package_finder: &mut impl PackageFinder<Error = EFind>,
     reinstall_options: &ReinstallOptions,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<Vec<Action>, InstallError<EDatabase, EFind>> {
@@ -66,7 +65,7 @@ pub fn remove_packages<EDatabase: Display>(
 }
 
 pub fn update_all_packages<EDatabase: Display, EFind: Display>(
-    package_finder: &impl PackageFinder<Error = EFind>,
+    package_finder: &mut impl PackageFinder<Error = EFind>,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<Vec<Action>, UpdateError<EDatabase, EFind>> {
     let packages = match db.get_all_packages() {
@@ -83,7 +82,7 @@ pub fn update_all_packages<EDatabase: Display, EFind: Display>(
 
 pub fn update_packages<EDatabase: Display, EFind: Display>(
     package_names: Vec<String>,
-    package_finder: &impl PackageFinder<Error = EFind>,
+    package_finder: &mut impl PackageFinder<Error = EFind>,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<Vec<Action>, UpdateError<EDatabase, EFind>> {
     let mut actions: Vec<Action> = Vec::new();
@@ -135,7 +134,7 @@ pub fn print_package_info<EDatabase: Display>(
 
 fn install_package<EFind: Display, EDatabase: Display>(
     package_name: &str,
-    package_finder: &impl PackageFinder<Error = EFind>,
+    package_finder: &mut impl PackageFinder<Error = EFind>,
     reinstall_options: &ReinstallOptions,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<LinkedHashSet<Action>, InstallError<EDatabase, EFind>> {
@@ -184,7 +183,7 @@ fn install_package<EFind: Display, EDatabase: Display>(
                                 }
                             };
 
-                        if let std::cmp::Ordering::Greater = remote_version.cmp(&local_version) {
+                        if remote_version.cmp(&local_version) == std::cmp::Ordering::Greater {
                             actions.insert(Action::Remove(local_package), ());
                         } else {
                             info!(
