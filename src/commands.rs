@@ -23,12 +23,17 @@ pub trait PackageFinder {
     fn find_package(&self, package_name: &str) -> Result<Option<RemotePackage>, Self::Error>;
 }
 
+pub enum ReinstallOptions {
+    Update,
+    ForceReinstall,
+    Ignore,
+}
+
 // TODO: migrate update and force_reinstall to enum
 pub fn install_packages<EFind: Display, EDatabase: Display>(
     packages: Vec<String>,
     package_finder: &impl PackageFinder<Error = EFind>,
-    update: bool,
-    force_reinstall: bool,
+    reinstall_options: &ReinstallOptions,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<Vec<Action>, InstallError<EDatabase, EFind>> {
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
@@ -37,8 +42,7 @@ pub fn install_packages<EFind: Display, EDatabase: Display>(
         actions.extend(install_package(
             package_name,
             package_finder,
-            update,
-            force_reinstall,
+            reinstall_options,
             db,
         )?);
     }
@@ -80,8 +84,7 @@ pub fn update_packages<EDatabase: Display, EFind: Display>(
         actions.extend(install_packages(
             packages_to_update,
             package_finder,
-            true,
-            false,
+            &ReinstallOptions::Update,
             db,
         )?);
     }
@@ -92,8 +95,7 @@ pub fn update_packages<EDatabase: Display, EFind: Display>(
 fn install_package<EFind: Display, EDatabase: Display>(
     package_name: &str,
     package_finder: &impl PackageFinder<Error = EFind>,
-    update: bool,
-    force_reinstall: bool,
+    reinstall_options: &ReinstallOptions,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<LinkedHashSet<Action>, InstallError<EDatabase, EFind>> {
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
@@ -102,18 +104,24 @@ fn install_package<EFind: Display, EDatabase: Display>(
     match db.get_package(package_name) {
         Ok(package) => {
             if let Some(package) = package {
-                // TODO: Only reinstall if remote version is newer if update and not force_reinstall is given
-                if update || force_reinstall {
-                    info!("Package {package_name} already installed, reinstalling...");
-                    // It's also possible to call remove_package and get the packge removal specific actions.
-                    // But this can cause issues.
-                    // - First a pointless database query for existance of the packge which is already guaranteed.
-                    // - Second, all the recursive removal related issues. We reinstall a package and there's no need to check for dependency
-                    // break as we will be installing it back again.
-                    actions.insert(Action::Remove(package), ());
-                } else {
-                    info!("Package {package_name} already installed. Ignoring...");
-                    return Ok(actions);
+                match reinstall_options {
+                    ReinstallOptions::ForceReinstall => {
+                        info!("Package {package_name} already installed, reinstalling...");
+                        // It's also possible to call remove_package and get the packge removal specific actions.
+                        // But this can cause issues.
+                        // - First a pointless database query for existance of the packge which is already guaranteed.
+                        // - Second, all the recursive removal related issues. We reinstall a package and there's no need to check for dependency
+                        // break as we will be installing it back again.
+                        actions.insert(Action::Remove(package), ());
+                    }
+                    ReinstallOptions::Update => {
+                        // TODO: Only reinstall if remote version is newer if update and not force_reinstall is given
+                        actions.insert(Action::Remove(package), ());
+                    }
+                    ReinstallOptions::Ignore => {
+                        info!("Package {package_name} already installed. Ignoring...");
+                        return Ok(actions);
+                    }
                 }
             }
         }
@@ -136,8 +144,7 @@ fn install_package<EFind: Display, EDatabase: Display>(
         actions.extend(install_package(
             dependency,
             package_finder,
-            update,
-            force_reinstall,
+            reinstall_options,
             db,
         )?);
     }

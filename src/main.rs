@@ -74,6 +74,12 @@ fn main() {
                 reinstall,
                 packages,
             } => {
+                let reinstall_options = if reinstall {
+                    commands::ReinstallOptions::ForceReinstall
+                } else {
+                    commands::ReinstallOptions::Ignore
+                };
+
                 // Depending on the error of the package_finder install_packages returns different Result types
                 // This makes it hard to call both of these functions in a non boilerplate way. This seems like
                 // the one that less code uses. Altough it does get rid of the error itself and just gets it's string
@@ -82,8 +88,7 @@ fn main() {
                     commands::install_packages(
                         packages,
                         &package_finders::FromFilePackageFinder,
-                        false,
-                        reinstall,
+                        &reinstall_options,
                         &mut db,
                     )
                     .map_err(|e| e.to_string())
@@ -91,8 +96,7 @@ fn main() {
                     commands::install_packages(
                         packages,
                         &package_finders::RemotePackageFinder::new(&config),
-                        false,
-                        reinstall,
+                        &reinstall_options,
                         &mut db,
                     )
                     .map_err(|e| e.to_string())
