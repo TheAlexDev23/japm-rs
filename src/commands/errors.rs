@@ -16,9 +16,9 @@ pub enum InstallError<EDatabase: Display, EFind: Display> {
 
 #[derive(Error, Debug, PartialEq)]
 pub enum RemoveError<EDatabase: Display> {
-    #[error("Package {0} not installed.")]
+    #[error("Package {0} not installed")]
     PackageNotInstalled(String),
-    #[error("Removing package {0} breaks dependencies {1:?}.")]
+    #[error("Removing package {0} breaks dependencies {1:?}")]
     DependencyBreak(String, Vec<String>),
     #[error("Could not get package from databae: {0}")]
     DatabaseGet(EDatabase),
@@ -32,4 +32,12 @@ pub enum UpdateError<EDatabase: Display, EFind: Display> {
     Remove(#[from] RemoveError<EDatabase>),
     #[error("Could not generate actions to install packages: {0}")]
     Install(#[from] InstallError<EDatabase, EFind>),
+}
+
+#[derive(Error, Debug, PartialEq)]
+pub enum InfoError<EDatabase: Display> {
+    #[error("Could not get package from databae: {0}")]
+    DatabaseGet(#[from] EDatabase),
+    #[error("Package {0} is not installed")]
+    PackageNotInstalled(String),
 }

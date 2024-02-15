@@ -109,6 +109,30 @@ pub fn update_packages<EDatabase: Display, EFind: Display>(
     Ok(actions)
 }
 
+pub fn print_package_info<EDatabase: Display>(
+    package_names: Vec<String>,
+    db: &mut impl PackagesDb<GetError = EDatabase>,
+) -> Result<(), InfoError<EDatabase>> {
+    for package_name in package_names.into_iter() {
+        let package = db.get_package(&package_name)?;
+        if package == None {
+            return Err(InfoError::PackageNotInstalled(package_name));
+        }
+
+        let package = package.unwrap();
+
+        info!(
+            "Package {package_name}:
+    version: {}
+    description: {}
+    dependencies: {:?}",
+            package.package_data.version, package.package_data.description, package.dependencies
+        );
+    }
+
+    Ok(())
+}
+
 fn install_package<EFind: Display, EDatabase: Display>(
     package_name: &str,
     package_finder: &impl PackageFinder<Error = EFind>,

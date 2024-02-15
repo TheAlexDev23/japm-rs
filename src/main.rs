@@ -123,7 +123,13 @@ fn main() {
                 }
             }
             .map_err(|e| e.to_string()),
-            _ => todo!("Command is unsupported"),
+            CommandType::Info { packages } => {
+                if let Err(error) = commands::print_package_info(packages, &mut db) {
+                    Err(error.to_string())
+                } else {
+                    Ok(vec![])
+                }
+            }
         };
 
         match result {
