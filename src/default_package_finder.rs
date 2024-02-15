@@ -50,52 +50,51 @@ impl PackageFinder for DefaultPackageFinder {
 
             let json_content = fs::read_to_string(path)?;
             Ok(Some(RemotePackage::from_json(&json_content)?))
+        } else if let Some(remote_package) =
+            self.remote_search_cache.get(&String::from(package_name))
+        {
+            trace!("Remote package chache hit for {package_name}");
+            Ok(Some(remote_package.clone()))
         } else {
-            if let Some(remote_package) = self.remote_search_cache.get(&String::from(package_name))
-            {
-                trace!("Remote package chache hit for {package_name}");
-                Ok(Some(remote_package.clone()))
-            } else {
-                let mut remotes = self.remotes.iter();
-                let json_content = loop {
-                    let mut remote = match remotes.next() {
-                        Some(remote) => remote.clone(),
-                        None => return Ok(None),
-                    };
-
-                    if remote.ends_with('/') {
-                        remote.push_str(format!("/packages/{package_name}/package.json").as_str());
-                    } else {
-                        remote.push_str(format!("packages/{package_name}/package.json").as_str());
-                    }
-
-                    let mut res = match reqwest::blocking::get(&remote) {
-                        Ok(res) => {
-                            if res.status() != StatusCode::OK {
-                                debug!("Package {package_name} not found in remote {remote}");
-                                continue;
-                            }
-
-                            res
-                        }
-                        Err(error) => {
-                            warn!("Error while attempting to download package:\n{error}");
-                            continue;
-                        }
-                    };
-
-                    let mut body = String::new();
-                    res.read_to_string(&mut body)?;
-                    break body;
+            let mut remotes = self.remotes.iter();
+            let json_content = loop {
+                let mut remote = match remotes.next() {
+                    Some(remote) => remote.clone(),
+                    None => return Ok(None),
                 };
 
-                let remote_package = RemotePackage::from_json(&json_content)?;
+                if remote.ends_with('/') {
+                    remote.push_str(format!("/packages/{package_name}/package.json").as_str());
+                } else {
+                    remote.push_str(format!("packages/{package_name}/package.json").as_str());
+                }
 
-                self.remote_search_cache
-                    .insert(String::from(package_name), remote_package.clone());
+                let mut res = match reqwest::blocking::get(&remote) {
+                    Ok(res) => {
+                        if res.status() != StatusCode::OK {
+                            debug!("Package {package_name} not found in remote {remote}");
+                            continue;
+                        }
 
-                Ok(Some(remote_package))
-            }
+                        res
+                    }
+                    Err(error) => {
+                        warn!("Error while attempting to download package:\n{error}");
+                        continue;
+                    }
+                };
+
+                let mut body = String::new();
+                res.read_to_string(&mut body)?;
+                break body;
+            };
+
+            let remote_package = RemotePackage::from_json(&json_content)?;
+
+            self.remote_search_cache
+                .insert(String::from(package_name), remote_package.clone());
+
+            Ok(Some(remote_package))
         }
     }
 }

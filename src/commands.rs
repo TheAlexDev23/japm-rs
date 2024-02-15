@@ -114,7 +114,7 @@ pub fn print_package_info<EDatabase: Display>(
 ) -> Result<(), InfoError<EDatabase>> {
     for package_name in package_names.into_iter() {
         let package = db.get_package(&package_name)?;
-        if package == None {
+        if package.is_none() {
             return Err(InfoError::PackageNotInstalled(package_name));
         }
 
