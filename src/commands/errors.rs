@@ -7,6 +7,9 @@ pub enum InstallError<EDatabase: Display, EFind: Display> {
     PackageNotFound(String),
     #[error("Error while searching for package {0}")]
     Find(EFind),
+    #[error("Could not parse package version: {0}")]
+    // semver::Error does not implement PartialEq so cannot be used directly. So instead should be converted to string.
+    VersionParse(String),
     #[error("A database error has occured {0}")]
     Database(EDatabase),
 }

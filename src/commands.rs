@@ -6,9 +6,10 @@ use crate::action::Action;
 use crate::db::PackagesDb;
 use crate::package::{LocalPackage, RemotePackage};
 
-pub use errors::*;
-
 use linked_hash_map::LinkedHashMap;
+use semver::Version;
+
+pub use errors::*;
 
 /// A linked hash set allows the guarantee that each element will be only once and the ability to iterate
 /// in the same order items where inserted.
@@ -101,9 +102,22 @@ fn install_package<EFind: Display, EDatabase: Display>(
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
     trace!("Generating install actions for package: {package_name}");
 
-    match db.get_package(package_name) {
+    let remote_package = match package_finder.find_package(package_name) {
         Ok(package) => {
-            if let Some(package) = package {
+            if package.is_none() {
+                return Err(InstallError::PackageNotFound(String::from(package_name)));
+            }
+
+            package.unwrap()
+        }
+        Err(error) => return Err(InstallError::Find(error)),
+    };
+
+    trace!("Found remote package:\n{remote_package:#?}");
+
+    match db.get_package(package_name) {
+        Ok(local_package) => {
+            if let Some(local_package) = local_package {
                 match reinstall_options {
                     ReinstallOptions::ForceReinstall => {
                         info!("Package {package_name} already installed, reinstalling...");
@@ -112,11 +126,32 @@ fn install_package<EFind: Display, EDatabase: Display>(
                         // - First a pointless database query for existance of the packge which is already guaranteed.
                         // - Second, all the recursive removal related issues. We reinstall a package and there's no need to check for dependency
                         // break as we will be installing it back again.
-                        actions.insert(Action::Remove(package), ());
+                        actions.insert(Action::Remove(local_package), ());
                     }
                     ReinstallOptions::Update => {
-                        // TODO: Only reinstall if remote version is newer if update and not force_reinstall is given
-                        actions.insert(Action::Remove(package), ());
+                        let remote_version =
+                            match Version::parse(&remote_package.package_data.version) {
+                                Ok(v) => v,
+                                Err(error) => {
+                                    return Err(InstallError::VersionParse(error.to_string()))
+                                }
+                            };
+                        let local_version =
+                            match Version::parse(&local_package.package_data.version) {
+                                Ok(v) => v,
+                                Err(error) => {
+                                    return Err(InstallError::VersionParse(error.to_string()))
+                                }
+                            };
+
+                        if let std::cmp::Ordering::Greater = remote_version.cmp(&local_version) {
+                            actions.insert(Action::Remove(local_package), ());
+                        } else {
+                            info!(
+                                "Package {package_name} is already at latest version. Ignoring..."
+                            );
+                            return Ok(actions);
+                        }
                     }
                     ReinstallOptions::Ignore => {
                         info!("Package {package_name} already installed. Ignoring...");
@@ -128,19 +163,7 @@ fn install_package<EFind: Display, EDatabase: Display>(
         Err(error) => return Err(InstallError::Database(error)),
     }
 
-    let package = match package_finder.find_package(package_name) {
-        Ok(package) => package,
-        Err(error) => return Err(InstallError::Find(error)),
-    };
-
-    if package.is_none() {
-        return Err(InstallError::PackageNotFound(String::from(package_name)));
-    }
-
-    let package = package.unwrap();
-
-    trace!("Found remote package:\n{package:#?}");
-    for dependency in package.dependencies.iter() {
+    for dependency in remote_package.dependencies.iter() {
         actions.extend(install_package(
             dependency,
             package_finder,
@@ -149,7 +172,7 @@ fn install_package<EFind: Display, EDatabase: Display>(
         )?);
     }
 
-    actions.insert(Action::Install(package), ());
+    actions.insert(Action::Install(remote_package), ());
 
     Ok(actions)
 }

@@ -42,6 +42,56 @@ fn test_installed_package_is_ignored() {
 }
 
 #[test]
+fn test_installed_package_is_updated() {
+    let (mut mock_db, mut package_finder) = get_mocks();
+    let remote_package = package_finder.get_simple_packge();
+
+    mock_db.add_package(&remote_package).unwrap();
+
+    let local_packge = mock_db
+        .get_package(&remote_package.package_data.name)
+        .unwrap()
+        .unwrap();
+
+    package_finder.update_remote_package_version(&remote_package.package_data.name);
+    let remote_package = package_finder.get_simple_packge();
+
+    let install_result = commands::install_packages(
+        vec![remote_package.package_data.name.clone()],
+        &package_finder,
+        &ReinstallOptions::Update,
+        &mut mock_db,
+    );
+
+    assert!(install_result.is_ok());
+    assert!(
+        install_result.unwrap()
+            == vec![
+                Action::Remove(local_packge),
+                Action::Install(remote_package)
+            ]
+    );
+}
+
+#[test]
+fn test_latest_ver_installed_package_is_updated() {
+    let (mut mock_db, package_finder) = get_mocks();
+    let remote_package = package_finder.get_simple_packge();
+
+    mock_db.add_package(&remote_package).unwrap();
+
+    let install_result = commands::install_packages(
+        vec![remote_package.package_data.name.clone()],
+        &package_finder,
+        &ReinstallOptions::Update,
+        &mut mock_db,
+    );
+
+    assert!(install_result.is_ok());
+    assert!(install_result.unwrap() == vec![]);
+}
+
+#[test]
 fn test_installed_package_is_reinstalled() {
     let (mut mock_db, package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
@@ -153,5 +203,5 @@ fn test_remove_simple_package_actions_generated_succesfully() {
 }
 
 fn get_mocks() -> (MockPackagesDb, MockPackageFinder) {
-    (MockPackagesDb::new(), MockPackageFinder)
+    (MockPackagesDb::new(), MockPackageFinder::new())
 }

@@ -1,34 +1,59 @@
+use std::collections::HashMap;
+
 use crate::package::{PackageData, RemotePackage};
 
 use crate::commands::PackageFinder;
 
-pub struct MockPackageFinder;
+pub struct MockPackageFinder {
+    packages_db: HashMap<String, RemotePackage>,
+}
+
 impl PackageFinder for MockPackageFinder {
     type Error = String;
 
     fn find_package(&self, package_name: &str) -> Result<Option<RemotePackage>, String> {
-        Ok(match package_name {
-            "simple_package" => Some(RemotePackage {
-                package_data: PackageData {
-                    name: String::from("simple_package"),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }),
-            "package_with_dependency" => Some(RemotePackage {
-                package_data: PackageData {
-                    name: String::from("package_with_dependency"),
-                    ..Default::default()
-                },
-                dependencies: vec![String::from("simple_package")],
-                ..Default::default()
-            }),
-            _ => None,
-        })
+        Ok(self.packages_db.get(&String::from(package_name)).cloned())
     }
 }
 
 impl MockPackageFinder {
+    pub fn new() -> MockPackageFinder {
+        let mut packages_db = HashMap::new();
+        packages_db.insert(
+            String::from("simple_package"),
+            RemotePackage {
+                package_data: PackageData {
+                    name: String::from("simple_package"),
+                    version: String::from("0.0.1"),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        packages_db.insert(
+            String::from("package_with_dependency"),
+            RemotePackage {
+                package_data: PackageData {
+                    name: String::from("package_with_dependency"),
+                    version: String::from("0.0.1"),
+                    ..Default::default()
+                },
+                dependencies: vec![String::from("simple_package")],
+                ..Default::default()
+            },
+        );
+
+        MockPackageFinder { packages_db }
+    }
+
+    pub fn update_remote_package_version(&mut self, package_name: &str) {
+        self.packages_db
+            .get_mut(package_name)
+            .unwrap()
+            .package_data
+            .version = String::from("0.0.2");
+    }
+
     pub fn get_simple_packge(&self) -> RemotePackage {
         self.find_package("simple_package").unwrap().unwrap()
     }
