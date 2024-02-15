@@ -8,7 +8,7 @@ use mock_package_finder::MockPackageFinder;
 mod mock_package_finder;
 
 #[test]
-fn test_install_simple_package_actions_generated_succesfully() {
+fn test_install_actions_generated_succesfully() {
     let (mut mock_db, package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
@@ -20,6 +20,20 @@ fn test_install_simple_package_actions_generated_succesfully() {
     );
 
     assert_actions(install_result, vec![Action::Install(remote_package)]);
+}
+
+
+#[test]
+fn test_remove_package_actions_generated_succesfully() {
+    let (mut mock_db, package_finder) = get_mocks();
+    let remote_package = package_finder.get_simple_packge();
+
+    let local_package = mock_install(&mut mock_db, &remote_package);
+
+    let remove_result =
+        commands::remove_packages(vec![remote_package.package_data.name], false, &mut mock_db);
+
+    assert_actions(remove_result, vec![Action::Remove(local_package)]);
 }
 
 #[test]
@@ -68,7 +82,7 @@ fn test_installed_package_is_updated() {
 }
 
 #[test]
-fn test_latest_ver_installed_package_is_updated() {
+fn test_latest_ver_installed_package_is_ignored() {
     let (mut mock_db, package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
@@ -108,7 +122,7 @@ fn test_installed_package_is_reinstalled() {
 }
 
 #[test]
-fn test_remove_package_non_recursive_with_depending_packges_is_not_allowed() {
+fn test_remove_package_with_depending_packages_is_not_allowed() {
     let (mut mock_db, package_finder) = get_mocks();
     let package_with_dependency = package_finder.get_package_with_dependency();
     let package_dependency = package_finder
@@ -133,7 +147,7 @@ fn test_remove_package_non_recursive_with_depending_packges_is_not_allowed() {
 }
 
 #[test]
-fn test_remove_package_recursive_removes_depending() {
+fn test_remove_package_removes_depending() {
     let (mut mock_db, package_finder) = get_mocks();
     let package_with_dependency = package_finder.get_package_with_dependency();
     let package_dependency = package_finder
@@ -162,18 +176,6 @@ fn test_remove_package_recursive_removes_depending() {
     );
 }
 
-#[test]
-fn test_remove_simple_package_actions_generated_succesfully() {
-    let (mut mock_db, package_finder) = get_mocks();
-    let remote_package = package_finder.get_simple_packge();
-
-    let local_package = mock_install(&mut mock_db, &remote_package);
-
-    let remove_result =
-        commands::remove_packages(vec![remote_package.package_data.name], false, &mut mock_db);
-
-    assert_actions(remove_result, vec![Action::Remove(local_package)]);
-}
 
 fn assert_actions<Error: std::fmt::Debug>(
     result: Result<Vec<Action>, Error>,
