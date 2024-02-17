@@ -1,13 +1,15 @@
 use std::process::exit;
+use std::sync::{Arc, Mutex};
 
-use default_package_finder::DefaultPackageFinder;
-use log::{error, trace};
-use logger::StdLogger;
+use log::{error, info, trace};
 
 use clap::{ArgAction, Parser, Subcommand};
 
 use config::Config;
 use db::SqlitePackagesDb;
+use default_package_finder::DefaultPackageFinder;
+use logger::TuiLogger;
+use tui::TuiManager;
 
 mod action;
 mod commands;
@@ -16,6 +18,7 @@ mod db;
 mod default_package_finder;
 mod logger;
 mod package;
+mod tui;
 
 #[cfg(test)]
 mod test_helpers;
@@ -57,7 +60,9 @@ enum CommandType {
 fn main() {
     let args = Args::parse();
 
-    let logger: Box<StdLogger> = Box::default();
+    let tui = Arc::new(Mutex::new(TuiManager::initialize().unwrap()));
+
+    let logger: Box<TuiLogger> = Box::new(TuiLogger::new(tui.clone()));
 
     match log::set_boxed_logger(logger) {
         Ok(()) => log::set_max_level(log::LevelFilter::Trace),
@@ -117,7 +122,7 @@ fn main() {
 
         match result {
             Ok(actions) => {
-                trace!("Performing actions:\n{actions:#?}");
+                trace!("Performing actions: {actions:#?}");
                 for action in actions {
                     trace!("Commiting action {action}");
                     if let Err(error) = action.commit(&mut db) {
@@ -131,6 +136,15 @@ fn main() {
                 error!("Error while performing command:\n{error_message}");
                 exit(-1);
             }
+        }
+    }
+
+    info!("Press any key to exit");
+    match crossterm::event::read() {
+        Ok(_) => tui.lock().unwrap().exit().unwrap(),
+        Err(error) => {
+            error!("Could not read input: {error}");
+            exit(-1);
         }
     }
 }
