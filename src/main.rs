@@ -1,4 +1,3 @@
-use std::process::exit;
 use std::sync::{Arc, Mutex};
 
 use log::{error, info, trace};
@@ -57,10 +56,22 @@ enum CommandType {
     },
 }
 
+static mut TUI: Option<Arc<Mutex<TuiManager>>> = None;
+
 fn main() {
     let args = Args::parse();
 
-    let tui = Arc::new(Mutex::new(TuiManager::initialize().unwrap()));
+    unsafe {
+        TUI = Some(Arc::new(Mutex::new(match TuiManager::initialize() {
+            Ok(tui_manager) => tui_manager,
+            Err(error) => {
+                eprintln!("Could not initialize TUI: {error}");
+                exit(-1);
+            }
+        })));
+    }
+
+    let tui = unsafe { TUI.clone() }.unwrap();
 
     let logger: Box<TuiLogger> = Box::new(TuiLogger::new(tui.clone()));
 
@@ -139,14 +150,7 @@ fn main() {
         }
     }
 
-    info!("Press any key to exit");
-    match crossterm::event::read() {
-        Ok(_) => tui.lock().unwrap().exit().unwrap(),
-        Err(error) => {
-            error!("Could not read input: {error}");
-            exit(-1);
-        }
-    }
+    exit(0);
 }
 
 fn get_config() -> Config {
@@ -201,4 +205,21 @@ fn get_db() -> SqlitePackagesDb {
             exit(-1);
         }
     }
+}
+
+fn exit(code: i32) -> ! {
+    let tui = unsafe { TUI.clone() };
+
+    if tui.is_some() {
+        info!("Press any key to exit");
+        let tui = tui.unwrap();
+        match crossterm::event::read() {
+            Ok(_) => tui.lock().expect("Could not lock TUI handle.").exit().expect("Could not exit from TUI mode. Run reset on your terminal if you're facing graphical issues."),
+            Err(error) => {
+                error!("Could not read input: {error}");
+            }
+        }
+    }
+
+    std::process::exit(code);
 }

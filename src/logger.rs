@@ -52,7 +52,7 @@ impl Log for StdLogger {
 
 impl<'a> Log for TuiLogger<'a> {
     fn log(&self, record: &log::Record) {
-        let mut tui = self.tui.lock().unwrap();
+        let mut tui = self.tui.lock().expect("Could not lock TUI handle.");
 
         let msg = format!("{}", record.args());
         let message = format!("{} [{}] {}", LINE_START, record.level(), msg);

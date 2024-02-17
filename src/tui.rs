@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::io;
 use std::io::Stderr;
 
@@ -7,7 +6,7 @@ use thiserror::Error;
 use ratatui::{
     prelude::{CrosstermBackend, Rect, Terminal},
     style::Style,
-    text::{Line, Span, Text},
+    text::{Line, Text},
     widgets::{Block, BorderType, Borders, Gauge, Paragraph},
 };
 
@@ -19,7 +18,7 @@ pub struct TuiManager<'a> {
 
 struct MessagesWindow<'a> {
     render_threshold: u16,
-    buffer: VecDeque<Line<'a>>,
+    buffer: Text<'a>,
     rect: Rect,
 }
 
@@ -59,12 +58,12 @@ impl<'a> TuiManager<'a> {
             width,
         };
 
-        let message_render_threshold = messages_rect.height + 20;
+        let message_render_threshold = messages_rect.height;
 
         Ok(TuiManager {
             messages_window: MessagesWindow {
                 render_threshold: message_render_threshold,
-                buffer: VecDeque::with_capacity(message_render_threshold as usize),
+                buffer: Text::default(),
                 rect: messages_rect,
             },
             progressbar_window: ProgressbarWindow {
@@ -86,33 +85,32 @@ impl<'a> TuiManager<'a> {
     }
 
     pub fn print_message(&mut self, message: String, style: Style) -> Result<(), io::Error> {
-        let message = Span::styled(message, style);
-
-        self.messages_window.buffer.push_back(Line::from(message));
-        if self.messages_window.buffer.len() == self.messages_window.render_threshold as usize {
-            self.messages_window.buffer.pop_front();
-        }
+        self.messages_window
+            .buffer
+            .lines
+            .push(Line::styled(message, style));
 
         self.refresh()
     }
 
     pub fn refresh(&mut self) -> Result<(), io::Error> {
-        let text = Text::from(
-            self.messages_window
-                .buffer
-                .iter()
-                .cloned()
-                .collect::<Vec<Line>>(),
-        );
+        let mut scroll = self.messages_window.buffer.lines.len() as i32
+            - self.messages_window.render_threshold as i32;
+
+        if scroll < 0 {
+            scroll = 0;
+        }
 
         self.terminal.draw(|frame| {
             frame.render_widget(
-                Paragraph::new(text).block(
-                    Block::default()
-                        .title("Ouptut")
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded),
-                ),
+                Paragraph::new(self.messages_window.buffer.clone())
+                    .scroll((scroll as u16, 0))
+                    .block(
+                        Block::default()
+                            .title("Ouptut")
+                            .borders(Borders::ALL)
+                            .border_type(BorderType::Rounded),
+                    ),
                 self.messages_window.rect,
             );
             frame.render_widget(Gauge::default().percent(20), self.progressbar_window.rect)
