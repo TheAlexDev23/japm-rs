@@ -1,5 +1,4 @@
-use std::sync::{Arc, Mutex};
-
+use frontends::TuiFrontend;
 use log::{error, info, trace};
 
 use clap::{ArgAction, Parser, Subcommand};
@@ -7,17 +6,16 @@ use clap::{ArgAction, Parser, Subcommand};
 use config::Config;
 use db::SqlitePackagesDb;
 use default_package_finder::DefaultPackageFinder;
-use logger::TuiLogger;
-use tui::TuiManager;
+use logger::FrontendLogger;
 
 mod action;
 mod commands;
 mod config;
 mod db;
 mod default_package_finder;
+mod frontends;
 mod logger;
 mod package;
-mod tui;
 
 #[cfg(test)]
 mod test_helpers;
@@ -56,26 +54,22 @@ enum CommandType {
     },
 }
 
-static mut TUI: Option<Arc<Mutex<TuiManager>>> = None;
+static mut GATHER_KEY_BEFORE_EXIT: bool = false;
 
 fn main() {
     let args = Args::parse();
 
+    frontends::set_boxed_frontend(Box::new(
+        TuiFrontend::init().expect("Could not initialize TUI frontend"),
+    ));
+
+    frontends::refresh();
+
     unsafe {
-        TUI = Some(Arc::new(Mutex::new(match TuiManager::initialize() {
-            Ok(tui_manager) => tui_manager,
-            Err(error) => {
-                eprintln!("Could not initialize TUI: {error}");
-                exit(-1);
-            }
-        })));
+        GATHER_KEY_BEFORE_EXIT = true;
     }
 
-    let tui = unsafe { TUI.clone() }.unwrap();
-
-    let logger: Box<TuiLogger> = Box::new(TuiLogger::new(tui.clone()));
-
-    match log::set_boxed_logger(logger) {
+    match log::set_boxed_logger(Box::new(FrontendLogger)) {
         Ok(()) => log::set_max_level(log::LevelFilter::Trace),
         Err(error) => {
             eprintln!("Could not setup logger: {error}");
@@ -208,18 +202,12 @@ fn get_db() -> SqlitePackagesDb {
 }
 
 fn exit(code: i32) -> ! {
-    let tui = unsafe { TUI.clone() };
-
-    if tui.is_some() {
+    if unsafe { GATHER_KEY_BEFORE_EXIT } {
         info!("Press any key to exit");
-        let tui = tui.unwrap();
-        match crossterm::event::read() {
-            Ok(_) => tui.lock().expect("Could not lock TUI handle.").exit().expect("Could not exit from TUI mode. Run reset on your terminal if you're facing graphical issues."),
-            Err(error) => {
-                error!("Could not read input: {error}");
-            }
-        }
+        crossterm::event::read().expect("Could not read input");
     }
+
+    frontends::exit();
 
     std::process::exit(code);
 }

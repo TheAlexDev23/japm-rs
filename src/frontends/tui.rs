@@ -5,12 +5,14 @@ use thiserror::Error;
 
 use ratatui::{
     prelude::{CrosstermBackend, Rect, Terminal},
-    style::Style,
+    style::{Style, Stylize},
     text::{Line, Text},
     widgets::{Block, BorderType, Borders, Gauge, Paragraph},
 };
 
-pub struct TuiManager<'a> {
+use super::{Frontend, MessageColor};
+
+pub struct TuiFrontend<'a> {
     messages_window: MessagesWindow<'a>,
     progressbar_window: ProgressbarWindow,
     terminal: Terminal<CrosstermBackend<Stderr>>,
@@ -34,8 +36,8 @@ pub enum InitializeError {
     Size(u16, u16, u16, u16),
 }
 
-impl<'a> TuiManager<'a> {
-    pub fn initialize() -> Result<TuiManager<'a>, InitializeError> {
+impl<'a> TuiFrontend<'a> {
+    pub fn init() -> Result<TuiFrontend<'a>, InitializeError> {
         const PROGRESSBAR_HEIGHT: u16 = 1;
 
         let (width, height) = crossterm::terminal::size()?;
@@ -60,7 +62,7 @@ impl<'a> TuiManager<'a> {
 
         let message_render_threshold = messages_rect.height;
 
-        Ok(TuiManager {
+        Ok(TuiFrontend {
             messages_window: MessagesWindow {
                 render_threshold: message_render_threshold,
                 buffer: Text::default(),
@@ -83,8 +85,44 @@ impl<'a> TuiManager<'a> {
             Ok(())
         }
     }
+}
 
-    pub fn print_message(&mut self, message: String, style: Style) -> Result<(), io::Error> {
+impl<'a> Frontend for TuiFrontend<'a> {
+    fn refresh(&mut self) {
+        let mut scroll = self.messages_window.buffer.lines.len() as i32
+            - self.messages_window.render_threshold as i32;
+
+        if scroll < 0 {
+            scroll = 0;
+        }
+
+        self.terminal
+            .draw(|frame| {
+                frame.render_widget(
+                    Paragraph::new(self.messages_window.buffer.clone())
+                        .scroll((scroll as u16, 0))
+                        .block(
+                            Block::default()
+                                .title("Ouptut")
+                                .borders(Borders::ALL)
+                                .border_type(BorderType::Rounded),
+                        ),
+                    self.messages_window.rect,
+                );
+                frame.render_widget(Gauge::default().percent(20), self.progressbar_window.rect)
+            })
+            .expect("Could not draw terminal");
+    }
+
+    fn display_message(&mut self, message: String, color: &super::MessageColor) {
+        let style = match color {
+            MessageColor::White => Style::default().white(),
+            MessageColor::Cyan => Style::default().cyan(),
+            MessageColor::Green => Style::default().green(),
+            MessageColor::Yellow => Style::default().yellow(),
+            MessageColor::Purple => Style::default().magenta(),
+        };
+
         self.messages_window
             .buffer
             .lines
@@ -93,35 +131,13 @@ impl<'a> TuiManager<'a> {
         self.refresh()
     }
 
-    pub fn refresh(&mut self) -> Result<(), io::Error> {
-        let mut scroll = self.messages_window.buffer.lines.len() as i32
-            - self.messages_window.render_threshold as i32;
-
-        if scroll < 0 {
-            scroll = 0;
-        }
-
-        self.terminal.draw(|frame| {
-            frame.render_widget(
-                Paragraph::new(self.messages_window.buffer.clone())
-                    .scroll((scroll as u16, 0))
-                    .block(
-                        Block::default()
-                            .title("Ouptut")
-                            .borders(Borders::ALL)
-                            .border_type(BorderType::Rounded),
-                    ),
-                self.messages_window.rect,
-            );
-            frame.render_widget(Gauge::default().percent(20), self.progressbar_window.rect)
-        })?;
-        Ok(())
+    fn set_progressbar(&mut self, _percentage: i32) {
+        todo!()
     }
 
-    pub fn exit(&mut self) -> Result<(), io::Error> {
-        crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen)?;
-        crossterm::terminal::disable_raw_mode()?;
-
-        Ok(())
+    fn exit(&mut self) {
+        crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen)
+            .expect("Could not leave alternate screen");
+        crossterm::terminal::disable_raw_mode().expect("Could not disable raw mode");
     }
 }
