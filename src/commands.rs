@@ -5,6 +5,7 @@ use log::{debug, info, trace};
 use crate::action::Action;
 use crate::db::PackagesDb;
 use crate::package::{LocalPackage, RemotePackage};
+use crate::progress::{Progress, ProgressType};
 
 use linked_hash_map::LinkedHashMap;
 use semver::Version;
@@ -34,17 +35,23 @@ pub fn install_packages<EFind: Display, EDatabase: Display>(
     packages: Vec<String>,
     package_finder: &mut impl PackageFinder<Error = EFind>,
     reinstall_options: &ReinstallOptions,
+    progress: &mut impl Progress,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<Vec<Action>, InstallError<EDatabase, EFind>> {
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
+
+    progress.increment_target(ProgressType::Packages, packages.len() as i32);
 
     for package_name in packages.iter() {
         actions.extend(install_package(
             package_name,
             package_finder,
             reinstall_options,
+            progress,
             db,
         )?);
+
+        progress.increment_completed(ProgressType::Packages, 1);
     }
 
     Ok(actions.keys().cloned().collect())
@@ -53,12 +60,16 @@ pub fn install_packages<EFind: Display, EDatabase: Display>(
 pub fn remove_packages<EDatabase: Display>(
     package_names: Vec<String>,
     recursive: bool,
+    progress: &mut impl Progress,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<Vec<Action>, RemoveError<EDatabase>> {
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
 
+    progress.increment_target(ProgressType::Packages, package_names.len() as i32);
+
     for package_name in package_names.into_iter() {
-        actions.extend(remove_package(&package_name, recursive, db)?);
+        actions.extend(remove_package(&package_name, recursive, progress, db)?);
+        progress.increment_completed(ProgressType::Packages, 1);
     }
 
     Ok(actions.keys().cloned().collect())
@@ -66,6 +77,7 @@ pub fn remove_packages<EDatabase: Display>(
 
 pub fn update_all_packages<EDatabase: Display, EFind: Display>(
     package_finder: &mut impl PackageFinder<Error = EFind>,
+    progress: &mut impl Progress,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<Vec<Action>, UpdateError<EDatabase, EFind>> {
     let packages = match db.get_all_packages() {
@@ -75,7 +87,13 @@ pub fn update_all_packages<EDatabase: Display, EFind: Display>(
 
     let packages = packages.into_iter().map(|p| p.package_data.name).collect();
 
-    let actions = install_packages(packages, package_finder, &ReinstallOptions::Update, db)?;
+    let actions = install_packages(
+        packages,
+        package_finder,
+        &ReinstallOptions::Update,
+        progress,
+        db,
+    )?;
 
     Ok(actions)
 }
@@ -83,6 +101,7 @@ pub fn update_all_packages<EDatabase: Display, EFind: Display>(
 pub fn update_packages<EDatabase: Display, EFind: Display>(
     package_names: Vec<String>,
     package_finder: &mut impl PackageFinder<Error = EFind>,
+    progress: &mut impl Progress,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<Vec<Action>, UpdateError<EDatabase, EFind>> {
     let mut actions: Vec<Action> = Vec::new();
@@ -101,6 +120,7 @@ pub fn update_packages<EDatabase: Display, EFind: Display>(
             packages_to_update,
             package_finder,
             &ReinstallOptions::Update,
+            progress,
             db,
         )?);
     }
@@ -136,6 +156,7 @@ fn install_package<EFind: Display, EDatabase: Display>(
     package_name: &str,
     package_finder: &mut impl PackageFinder<Error = EFind>,
     reinstall_options: &ReinstallOptions,
+    progress: &mut impl Progress,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<LinkedHashSet<Action>, InstallError<EDatabase, EFind>> {
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
@@ -202,13 +223,21 @@ fn install_package<EFind: Display, EDatabase: Display>(
         Err(error) => return Err(InstallError::Database(error)),
     }
 
+    progress.increment_target(
+        ProgressType::Packages,
+        remote_package.dependencies.len() as i32,
+    );
+
     for dependency in remote_package.dependencies.iter() {
         actions.extend(install_package(
             dependency,
             package_finder,
             reinstall_options,
+            progress,
             db,
         )?);
+
+        progress.increment_completed(ProgressType::Packages, 1);
     }
 
     actions.insert(Action::Install(remote_package), ());
@@ -219,6 +248,7 @@ fn install_package<EFind: Display, EDatabase: Display>(
 fn remove_package<EDatabase: Display>(
     package_name: &str,
     recursive: bool,
+    progress: &mut impl Progress,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<LinkedHashSet<Action>, RemoveError<EDatabase>> {
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
@@ -243,12 +273,17 @@ fn remove_package<EDatabase: Display>(
     if !depending_packages.is_empty() {
         if recursive {
             info!("Found depending packages, uninstalling...");
+            progress.increment_target(ProgressType::Packages, depending_packages.len() as i32);
+
             for dependency in depending_packages.iter() {
                 actions.extend(remove_package(
                     &dependency.package_data.name,
                     recursive,
+                    progress,
                     db,
                 )?);
+
+                progress.increment_completed(ProgressType::Packages, 1);
             }
         } else {
             let depending_packages: Vec<String> = depending_packages

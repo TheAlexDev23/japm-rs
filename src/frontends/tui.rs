@@ -28,6 +28,7 @@ struct TextWindow<'a> {
 }
 
 struct ProgressbarWindow {
+    progress: f32,
     rect: Rect,
 }
 
@@ -91,6 +92,7 @@ impl<'a> TuiFrontend<'a> {
                 rect: actions_rect,
             },
             progressbar_window: ProgressbarWindow {
+                progress: 0.0,
                 rect: progressbar_rect,
             },
             terminal: Terminal::new(CrosstermBackend::new(std::io::stderr()))?,
@@ -116,7 +118,10 @@ impl<'a> Frontend for TuiFrontend<'a> {
                 self.messages_window.render(frame);
                 self.actions_window.render(frame);
 
-                frame.render_widget(Gauge::default().percent(20), self.progressbar_window.rect)
+                frame.render_widget(
+                    Gauge::default().percent((self.progressbar_window.progress * 100.0) as u16),
+                    self.progressbar_window.rect,
+                )
             })
             .expect("Could not draw terminal");
     }
@@ -152,8 +157,9 @@ impl<'a> Frontend for TuiFrontend<'a> {
         self.refresh();
     }
 
-    fn set_progressbar(&mut self, _percentage: i32) {
-        todo!()
+    fn set_progressbar(&mut self, percentage: f32) {
+        self.progressbar_window.progress = percentage;
+        self.refresh();
     }
 
     fn exit(&mut self) {

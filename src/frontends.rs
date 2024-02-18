@@ -20,7 +20,7 @@ pub trait Frontend {
     fn refresh(&mut self);
     fn display_message(&mut self, message: String, color: &MessageColor);
     fn display_action(&mut self, action: &Action);
-    fn set_progressbar(&mut self, percentage: i32);
+    fn set_progressbar(&mut self, percentage: f32);
     fn exit(&mut self);
 }
 
@@ -30,17 +30,13 @@ pub fn set_boxed_frontend(frontend: Box<dyn Frontend>) {
     }
 }
 
-pub fn refresh() {
-    get_frontend().refresh();
-}
 pub fn display_message(message: String, color: &MessageColor) {
     get_frontend().display_message(message, color);
 }
 pub fn display_action(action: &Action) {
     get_frontend().display_action(action);
 }
-#[allow(dead_code)]
-pub fn set_progressbar(percentage: i32) {
+pub fn set_progressbar(percentage: f32) {
     get_frontend().set_progressbar(percentage);
 }
 pub fn exit() {

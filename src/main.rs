@@ -7,6 +7,7 @@ use config::Config;
 use db::SqlitePackagesDb;
 use default_package_finder::DefaultPackageFinder;
 use logger::FrontendLogger;
+use progress::{FrontendProgress, Progress, ProgressType};
 
 mod action;
 mod commands;
@@ -16,6 +17,7 @@ mod default_package_finder;
 mod frontends;
 mod logger;
 mod package;
+mod progress;
 
 #[cfg(test)]
 mod test_helpers;
@@ -63,11 +65,11 @@ fn main() {
         TuiFrontend::init().expect("Could not initialize TUI frontend"),
     ));
 
-    frontends::refresh();
-
     unsafe {
         GATHER_KEY_BEFORE_EXIT = true;
     }
+
+    let mut progress = FrontendProgress::new();
 
     match log::set_boxed_logger(Box::new(FrontendLogger)) {
         Ok(()) => log::set_max_level(log::LevelFilter::Trace),
@@ -76,9 +78,13 @@ fn main() {
         }
     };
 
+    progress.increment_target(ProgressType::Setup, 2);
+
     let config = get_config();
+    progress.increment_completed(ProgressType::Setup, 1);
 
     let mut db = get_db();
+    progress.increment_completed(ProgressType::Setup, 1);
 
     if let Some(command) = args.command {
         let result: Result<Vec<action::Action>, String> = match command {
@@ -99,6 +105,7 @@ fn main() {
                     packages,
                     &mut package_finder,
                     &reinstall_options,
+                    &mut progress,
                     &mut db,
                 )
                 .map_err(|e| e.to_string())
@@ -106,13 +113,14 @@ fn main() {
             CommandType::Remove {
                 packages,
                 recursive,
-            } => commands::remove_packages(packages, recursive, &mut db).map_err(|e| e.to_string()),
+            } => commands::remove_packages(packages, recursive, &mut progress, &mut db)
+                .map_err(|e| e.to_string()),
             CommandType::Update { system, packages } => {
                 let mut package_finder = DefaultPackageFinder::new(false, &config);
                 if system {
-                    commands::update_all_packages(&mut package_finder, &mut db)
+                    commands::update_all_packages(&mut package_finder, &mut progress, &mut db)
                 } else {
-                    commands::update_packages(packages, &mut package_finder, &mut db)
+                    commands::update_packages(packages, &mut package_finder, &mut progress, &mut db)
                 }
             }
             .map_err(|e| e.to_string()),
@@ -128,6 +136,17 @@ fn main() {
         match result {
             Ok(actions) => {
                 trace!("Performing actions: {actions:#?}");
+
+                // If no actions need to be performed the actions progress would be 0/0 which is
+                // treated as 0% completed by the current implementaion. Setting it 1/1 will
+                // prevent the end screen having non 100% completion even if everything is
+                // completed
+                if actions.is_empty() {
+                    progress.set_comleted(progress::ProgressType::Actions);
+                }
+
+                progress.increment_target(ProgressType::Actions, actions.len() as i32);
+
                 for action in actions {
                     trace!("Commiting action {action}");
                     if let Err(error) = action.commit(&mut db) {
@@ -136,6 +155,7 @@ fn main() {
                         trace!("Commited action");
                     }
 
+                    progress.increment_completed(ProgressType::Actions, 1);
                     frontends::display_action(&action);
                 }
             }
