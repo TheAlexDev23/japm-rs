@@ -1,4 +1,3 @@
-use frontends::TuiFrontend;
 use log::{error, info, trace};
 
 use clap::{ArgAction, Parser, Subcommand};
@@ -6,6 +5,7 @@ use clap::{ArgAction, Parser, Subcommand};
 use config::Config;
 use db::SqlitePackagesDb;
 use default_package_finder::DefaultPackageFinder;
+use frontends::{StdFrontend, TuiFrontend};
 use logger::FrontendLogger;
 use progress::{FrontendProgress, Progress, ProgressType};
 
@@ -27,6 +27,8 @@ mod test_helpers;
 struct Args {
     #[arg(short, long, action=ArgAction::SetTrue)]
     verbose: bool,
+    #[arg(long, action=ArgAction::SetTrue)]
+    no_tui: bool,
     #[command(subcommand)]
     /// Command to perform
     command: Option<CommandType>,
@@ -61,18 +63,27 @@ static mut GATHER_KEY_BEFORE_EXIT: bool = false;
 fn main() {
     let args = Args::parse();
 
-    frontends::set_boxed_frontend(Box::new(
-        TuiFrontend::init().expect("Could not initialize TUI frontend"),
-    ));
-
-    unsafe {
-        GATHER_KEY_BEFORE_EXIT = true;
+    if args.no_tui {
+        frontends::set_boxed_frontend(Box::new(
+            StdFrontend::new().expect("Could not initialize std frontend."),
+        ))
+    } else {
+        frontends::set_boxed_frontend(Box::new(
+            TuiFrontend::init().expect("Could not initialize TUI frontend"),
+        ));
+        unsafe {
+            GATHER_KEY_BEFORE_EXIT = true;
+        }
     }
 
     let mut progress = FrontendProgress::new();
 
     match log::set_boxed_logger(Box::new(FrontendLogger)) {
-        Ok(()) => log::set_max_level(log::LevelFilter::Trace),
+        Ok(()) => log::set_max_level(if args.verbose {
+            log::LevelFilter::Trace
+        } else {
+            log::LevelFilter::Info
+        }),
         Err(error) => {
             eprintln!("Could not setup logger: {error}");
         }

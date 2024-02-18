@@ -1,10 +1,12 @@
-mod tui;
-
 use std::sync::{Mutex, MutexGuard};
 
 use crate::action::Action;
 
+pub use stdout::StdFrontend;
 pub use tui::TuiFrontend;
+
+mod stdout;
+mod tui;
 
 pub enum MessageColor {
     White,
