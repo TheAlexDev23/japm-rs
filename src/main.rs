@@ -135,6 +135,8 @@ fn main() {
                     } else {
                         trace!("Commited action");
                     }
+
+                    frontends::display_action(&action);
                 }
             }
             Err(error_message) => {

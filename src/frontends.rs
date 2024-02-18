@@ -2,6 +2,8 @@ mod tui;
 
 use std::sync::{Mutex, MutexGuard};
 
+use crate::action::Action;
+
 pub use tui::TuiFrontend;
 
 pub enum MessageColor {
@@ -17,6 +19,7 @@ static mut CURRENT_FRONTEND: Option<Mutex<Box<dyn Frontend>>> = None;
 pub trait Frontend {
     fn refresh(&mut self);
     fn display_message(&mut self, message: String, color: &MessageColor);
+    fn display_action(&mut self, action: &Action);
     fn set_progressbar(&mut self, percentage: i32);
     fn exit(&mut self);
 }
@@ -32,6 +35,9 @@ pub fn refresh() {
 }
 pub fn display_message(message: String, color: &MessageColor) {
     get_frontend().display_message(message, color);
+}
+pub fn display_action(action: &Action) {
+    get_frontend().display_action(action);
 }
 #[allow(dead_code)]
 pub fn set_progressbar(percentage: i32) {

@@ -49,7 +49,7 @@ pub enum Error<EDatabaseAdd: Display, EDatabaseRemove: Display> {
 
 impl Action {
     pub fn commit<EDatabaseAdd: Display, EDatabaseRemove: Display>(
-        self,
+        &self,
         db: &mut impl PackagesDb<AddError = EDatabaseAdd, RemoveError = EDatabaseRemove>,
     ) -> Result<(), Error<EDatabaseAdd, EDatabaseRemove>> {
         debug!("Action commit {self}");
@@ -71,7 +71,7 @@ impl Action {
 
         match self {
             Action::Install(package) => {
-                if let Err(error) = db.add_package(&package) {
+                if let Err(error) = db.add_package(package) {
                     return Err(Error::DatabaseAdd(error));
                 }
             }
