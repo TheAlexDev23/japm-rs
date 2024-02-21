@@ -102,7 +102,10 @@ fn install_package<EDatabaseAdd: Display, EDatabaseRemove: Display>(
     trace!("Detected package files: {package_files:#?}");
 
     install_package_files(&package_files)?;
-    package.package_files = package_files.into_iter().map(|group| group.1).collect();
+    package.package_files = package_files
+        .into_iter()
+        .map(|group| group.1.to_string_lossy().into_owned())
+        .collect();
 
     run_commands(&package.post_install, &install_directory)?;
 
@@ -119,18 +122,6 @@ fn remove_package<EDatabaseAdd: Display, EDatabaseRemove: Display>(
     Ok(())
 }
 
-fn install_package_files(package_files: &Vec<(String, String)>) -> Result<(), io::Error> {
-    for path_group in package_files {
-        let source = &path_group.0;
-        let dest = &path_group.1;
-
-        trace!("Moving {:?} to {:?}", source, dest);
-        fs::rename(source, dest)?;
-    }
-
-    Ok(())
-}
-
 /// Find the files located in `path` that do not exist in `root_path`, and returns an array of
 /// original paths and their non-existing root translated equivalents.
 ///
@@ -142,17 +133,14 @@ fn find_package_files(
     path: &Path,
     base_path: &Path,
     root_path: &Path,
-) -> Result<Vec<(String, String)>, io::Error> {
+) -> Result<Vec<(PathBuf, PathBuf)>, io::Error> {
     let mut new_dirs = Vec::new();
     for subpath in fs::read_dir(path)? {
         let subpath = subpath?.path();
         let translated_subpath = translate_to_root(&subpath, base_path, root_path);
 
         if !Path::try_exists(&translated_subpath)? {
-            new_dirs.push((
-                subpath.to_string_lossy().into_owned(),
-                translated_subpath.to_string_lossy().into_owned(),
-            ));
+            new_dirs.push((subpath, translated_subpath));
             continue;
         }
 
@@ -172,7 +160,19 @@ fn translate_to_root(file: &Path, files_root_dir: &Path, root_dir: &Path) -> Pat
     root_dir.join(relative)
 }
 
-fn delete_package_files(package_files: &Vec<String>) -> Result<(), io::Error> {
+fn install_package_files(package_files: &[(PathBuf, PathBuf)]) -> Result<(), io::Error> {
+    for path_group in package_files {
+        let source = &path_group.0;
+        let dest = &path_group.1;
+
+        trace!("Moving {:?} to {:?}", source, dest);
+        fs::rename(source, dest)?;
+    }
+
+    Ok(())
+}
+
+fn delete_package_files(package_files: &[String]) -> Result<(), io::Error> {
     for path in package_files {
         info!("Deleting path {:?}", path);
         if Path::is_dir(Path::new(&path)) {
