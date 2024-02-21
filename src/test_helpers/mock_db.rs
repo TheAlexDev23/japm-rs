@@ -21,7 +21,9 @@ impl PackagesDb for MockPackagesDb {
     fn add_package(&mut self, package: &RemotePackage) -> Result<(), String> {
         let local_packge = LocalPackage {
             package_data: package.package_data.clone(),
-            remove: package.remove.clone(),
+            pre_remove: package.pre_remove.clone(),
+            post_remove: package.post_remove.clone(),
+            package_files: package.package_files.clone(),
             dependencies: package.dependencies.clone(),
         };
 

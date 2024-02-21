@@ -6,10 +6,15 @@ pub struct RemotePackage {
 
     pub dependencies: Vec<String>,
 
+    pub pre_install: Vec<String>,
     pub install: Vec<String>,
-    pub remove: Vec<String>,
+    pub post_install: Vec<String>,
 
-    pub files: Vec<RemoteFile>,
+    pub pre_remove: Vec<String>,
+    /// Is empty until install action on package is performed
+    #[serde(skip_deserializing)]
+    pub package_files: Vec<String>,
+    pub post_remove: Vec<String>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -18,7 +23,9 @@ pub struct LocalPackage {
 
     pub dependencies: Vec<String>,
 
-    pub remove: Vec<String>,
+    pub pre_remove: Vec<String>,
+    pub package_files: Vec<String>,
+    pub post_remove: Vec<String>,
 }
 
 #[derive(Default, Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
@@ -26,12 +33,6 @@ pub struct PackageData {
     pub name: String,
     pub version: String,
     pub description: String,
-}
-
-#[derive(Default, Debug, Deserialize, Clone, Hash, PartialEq, Eq)]
-pub struct RemoteFile {
-    pub url: String,
-    pub target_path: String,
 }
 
 impl RemotePackage {

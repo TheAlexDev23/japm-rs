@@ -1,0 +1,34 @@
+{
+	"package_data": {
+		"name": "test-package",
+		"version": "1.0.0",
+		"description": "just a basic package used for testing"
+	},
+	"dependencies": [],
+	"build dependencies": [],
+	"files": [],
+	"pre_install": [
+		"echo pi1",
+		"echo pi2",
+		"echo pi3"
+	],
+	"install": [
+		"mkdir -p ./usr/my_app/",
+		"touch ./usr/my_app/exec"
+	],
+	"post_install": [
+		"echo pst1",
+		"echo pst2",
+		"echo pst3"
+	],
+	"pre_remove": [
+		"echo pr1",
+		"echo pr2",
+		"echo pr3"
+	],
+	"post_remove": [
+		"echo pstr1",
+		"echo pstr2",
+		"echo pstr3"
+	]
+}

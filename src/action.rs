@@ -1,8 +1,10 @@
 use std::fmt::Display;
+use std::fs;
 use std::io;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use log::{debug, trace, warn};
+use log::{debug, info, trace, warn};
 
 use thiserror::Error;
 
@@ -31,7 +33,7 @@ pub enum Error<EDatabaseAdd: Display, EDatabaseRemove: Display> {
     #[error("Could not parse command: {0}")]
     Parse(#[from] shell_words::ParseError),
 
-    #[error("Could not read output: {0}")]
+    #[error("An IO error has occured: {0}")]
     IO(#[from] io::Error),
 
     #[error("Command {0} is invalid: {0}")]
@@ -49,33 +51,22 @@ pub enum Error<EDatabaseAdd: Display, EDatabaseRemove: Display> {
 
 impl Action {
     pub fn commit<EDatabaseAdd: Display, EDatabaseRemove: Display>(
-        &self,
+        &mut self,
+        package_build_path: &str,
         db: &mut impl PackagesDb<AddError = EDatabaseAdd, RemoveError = EDatabaseRemove>,
     ) -> Result<(), Error<EDatabaseAdd, EDatabaseRemove>> {
         debug!("Action commit {self}");
-        let command_iter = match self {
-            Action::Install(ref package) => package.install.iter(),
-            Action::Remove(ref package) => package.remove.iter(),
-        };
-
-        for command in command_iter {
-            debug!("Running command {command}");
-            let (stdout, stderr) = run_command(command)?;
-            if !stdout.is_empty() {
-                debug!("out: {stdout}");
-            }
-            if !stderr.is_empty() {
-                warn!("err: {stderr}");
-            }
-        }
 
         match self {
-            Action::Install(package) => {
+            Action::Install(ref mut package) => {
+                install_package(package, package_build_path)?;
                 if let Err(error) = db.add_package(package) {
                     return Err(Error::DatabaseAdd(error));
                 }
             }
-            Action::Remove(package) => {
+            Action::Remove(ref mut package) => {
+                remove_package(package)?;
+
                 if let Err(error) = db.remove_package(&package.package_data.name) {
                     return Err(Error::DatabaseRemove(error));
                 }
@@ -86,8 +77,137 @@ impl Action {
     }
 }
 
+fn install_package<EDatabaseAdd: Display, EDatabaseRemove: Display>(
+    package: &mut RemotePackage,
+    package_build_path: &str,
+) -> Result<(), Error<EDatabaseAdd, EDatabaseRemove>> {
+    let install_directory = format!("{}/{}", package_build_path, package.package_data.name);
+
+    if fs::metadata(&install_directory).is_ok() {
+        fs::remove_dir_all(&install_directory)?;
+    }
+    fs::create_dir_all(&install_directory)?;
+
+    run_commands(&package.pre_install, &install_directory)?;
+
+    run_commands(&package.install, &install_directory)?;
+
+    let path_install_directory = Path::new(&install_directory);
+    let package_files = find_package_files(
+        path_install_directory,
+        path_install_directory,
+        Path::new("/"),
+    )?;
+
+    trace!("Detected package files: {package_files:#?}");
+
+    install_package_files(&package_files)?;
+    package.package_files = package_files.into_iter().map(|group| group.1).collect();
+
+    run_commands(&package.post_install, &install_directory)?;
+
+    Ok(())
+}
+
+fn remove_package<EDatabaseAdd: Display, EDatabaseRemove: Display>(
+    package: &LocalPackage,
+) -> Result<(), Error<EDatabaseAdd, EDatabaseRemove>> {
+    run_commands(&package.pre_remove, "/")?;
+    delete_package_files(&package.package_files)?;
+    run_commands(&package.post_remove, "/")?;
+
+    Ok(())
+}
+
+fn install_package_files(package_files: &Vec<(String, String)>) -> Result<(), io::Error> {
+    for path_group in package_files {
+        let source = &path_group.0;
+        let dest = &path_group.1;
+
+        trace!("Moving {:?} to {:?}", source, dest);
+        fs::rename(source, dest)?;
+    }
+
+    Ok(())
+}
+
+/// Find the files located in `path` that do not exist in `root_path`, and returns an array of
+/// original paths and their non-existing root translated equivalents.
+///
+/// For example, given normal parameters (root_path is `/`), then if an empty usr subdirectory exists
+/// in `path`, it won't be included in the result as `/usr` already exists on most filesystems.
+/// However, if `path` has `./usr/bin/some_application_name/` subdirectories, then it will be included (given
+/// that `some_application_name` is not installed and `/usr/bin/some_application_name/` does not exist)
+fn find_package_files(
+    path: &Path,
+    base_path: &Path,
+    root_path: &Path,
+) -> Result<Vec<(String, String)>, io::Error> {
+    let mut new_dirs = Vec::new();
+    for subpath in fs::read_dir(path)? {
+        let subpath = subpath?.path();
+        let translated_subpath = translate_to_root(&subpath, base_path, root_path);
+
+        if !Path::try_exists(&translated_subpath)? {
+            new_dirs.push((
+                subpath.to_string_lossy().into_owned(),
+                translated_subpath.to_string_lossy().into_owned(),
+            ));
+            continue;
+        }
+
+        if subpath.is_dir() {
+            new_dirs.extend(find_package_files(&subpath, base_path, root_path)?);
+        }
+    }
+
+    Ok(new_dirs)
+}
+
+fn translate_to_root(file: &Path, files_root_dir: &Path, root_dir: &Path) -> PathBuf {
+    let relative = file
+        .strip_prefix(files_root_dir)
+        .expect("Could not replace prefix");
+
+    root_dir.join(relative)
+}
+
+fn delete_package_files(package_files: &Vec<String>) -> Result<(), io::Error> {
+    for path in package_files {
+        info!("Deleting path {:?}", path);
+        if Path::is_dir(Path::new(&path)) {
+            fs::remove_dir_all(path)?;
+        } else {
+            fs::remove_file(path)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn run_commands<EDatabaseAdd: Display, EDatabaseRemove: Display>(
+    commands: &Vec<String>,
+    directory: &str,
+) -> Result<(), Error<EDatabaseAdd, EDatabaseRemove>> {
+    for command in commands {
+        debug!("Running command {command}");
+
+        let (stdout, stderr) = run_command(command, directory)?;
+
+        if !stdout.is_empty() {
+            debug!("out: {stdout}");
+        }
+        if !stderr.is_empty() {
+            warn!("err: {stderr}");
+        }
+    }
+
+    Ok(())
+}
+
 fn run_command<EDatabaseAdd: Display, EDatabaseRemove: Display>(
     command: &str,
+    directory: &str,
 ) -> Result<(String, String), Error<EDatabaseAdd, EDatabaseRemove>> {
     let args = shell_words::split(command)?;
     if args.is_empty() {
@@ -107,7 +227,7 @@ fn run_command<EDatabaseAdd: Display, EDatabaseRemove: Display>(
         command_proc.arg(arg);
     }
 
-    let result = command_proc.output()?;
+    let result = command_proc.current_dir(directory).output()?;
 
     let stdout = String::from_utf8_lossy(&result.stdout).to_string();
     let stderr = String::from_utf8_lossy(&result.stderr).to_string();

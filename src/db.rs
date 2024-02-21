@@ -41,7 +41,9 @@ table! {
         name -> Text,
         version -> Text,
         description -> Text,
-        remove_instructions -> Text,
+        pre_remove -> Text,
+        package_files -> Text,
+        post_remove -> Text,
         dependencies -> Text,
     }
 }
@@ -53,8 +55,12 @@ struct AddPackage {
     name: String,
     version: String,
     description: String,
-    ///  Json array of remove instructions
-    remove_instructions: String,
+    ///  Json array of pre_remove instructions
+    pre_remove: String,
+    ///  Json array of package filenames
+    package_files: String,
+    ///  Json array of post_remove instructions
+    post_remove: String,
     /// Json array of dependencies' names
     dependencies: String,
 }
@@ -68,10 +74,14 @@ struct GetPackage {
     pub name: String,
     pub version: String,
     pub description: String,
-    /// Json array of remove instructions
-    pub remove_instructions: String,
+    ///  Json array of pre_remove instructions
+    pub pre_remove: String,
+    ///  Json array of package filenames
+    pub package_files: String,
+    ///  Json array of post_remove instructions
+    pub post_remove: String,
     /// Json array of dependencies' names
-    dependencies: String,
+    pub dependencies: String,
 }
 
 const DATABASE_SOURCE: &str = "/var/lib/japm/packages.db";
@@ -115,7 +125,9 @@ impl SqlitePackagesDb {
                 name TEXT NOT NULL,
                 version TEXT NOT NULL,
                 description TEXT,
-                remove_instructions TEXT,
+                pre_remove TEXT,
+                package_files TEXT,
+                post_remove TEXT,
                 dependencies TEXT
             )";
 
@@ -216,7 +228,9 @@ impl TryFrom<&RemotePackage> for AddPackage {
             name: package.package_data.name.clone(),
             version: package.package_data.version.clone(),
             description: package.package_data.description.clone(),
-            remove_instructions: serde_json::to_string(&package.remove)?,
+            pre_remove: serde_json::to_string(&package.pre_remove)?,
+            package_files: serde_json::to_string(&package.package_files)?,
+            post_remove: serde_json::to_string(&package.post_remove)?,
             dependencies: serde_json::to_string(&package.dependencies)?,
         })
     }
@@ -232,7 +246,9 @@ impl TryInto<LocalPackage> for GetPackage {
                 version: self.version,
                 description: self.description,
             },
-            remove: serde_json::from_str(&self.remove_instructions)?,
+            pre_remove: serde_json::from_str(&self.pre_remove)?,
+            package_files: serde_json::from_str(&self.package_files)?,
+            post_remove: serde_json::from_str(&self.post_remove)?,
             dependencies: serde_json::from_str(&self.dependencies)?,
         })
     }

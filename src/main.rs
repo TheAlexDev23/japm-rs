@@ -158,9 +158,9 @@ fn main() {
 
                 progress.increment_target(ProgressType::Actions, actions.len() as i32);
 
-                for action in actions {
+                for mut action in actions {
                     trace!("Commiting action {action}");
-                    if let Err(error) = action.commit(&mut db) {
+                    if let Err(error) = action.commit("/var/lib/japm/install_pkgs", &mut db) {
                         error!("Could not commit action:\n{error}");
                     } else {
                         trace!("Commited action");
