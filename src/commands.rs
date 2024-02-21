@@ -175,7 +175,7 @@ fn install_package<EFind: Display, EDatabase: Display>(
 
     trace!("Found remote package:\n{remote_package:#?}");
 
-    match db.get_package(package_name) {
+    match db.get_package(&remote_package.package_data.name) {
         Ok(local_package) => {
             if let Some(local_package) = local_package {
                 match reinstall_options {
