@@ -4,16 +4,21 @@ use serde::Deserialize;
 pub struct RemotePackage {
     pub package_data: PackageData,
 
+    #[serde(default)]
     pub dependencies: Vec<String>,
 
+    #[serde(default)]
     pub pre_install: Vec<String>,
     pub install: Vec<String>,
+    #[serde(default)]
     pub post_install: Vec<String>,
 
+    #[serde(default)]
     pub pre_remove: Vec<String>,
     /// Is empty until install action on package is performed
     #[serde(skip_deserializing)]
     pub package_files: Vec<String>,
+    #[serde(default)]
     pub post_remove: Vec<String>,
 }
 
