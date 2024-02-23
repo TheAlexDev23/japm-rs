@@ -1,13 +1,20 @@
+use std::{
+    fmt::Display,
+    sync::{Arc, Mutex},
+};
+
+use action::{Action, BuildError};
 use log::{error, info, trace};
 
 use clap::{ArgAction, Parser, Subcommand};
 
 use config::Config;
-use db::SqlitePackagesDb;
+use db::{PackagesDb, SqlitePackagesDb};
 use default_package_finder::DefaultPackageFinder;
 use frontends::{StdFrontend, TuiFrontend};
 use logger::FrontendLogger;
-use progress::{FrontendProgress, Progress, ProgressType};
+use progress::{FrontendProgress, ProgressType};
+use threadpool::ThreadPool;
 
 mod action;
 mod commands;
@@ -29,6 +36,7 @@ struct Args {
     verbose: bool,
     #[arg(long, action=ArgAction::SetTrue)]
     no_tui: bool,
+    build_threads: Option<usize>,
     #[command(subcommand)]
     /// Command to perform
     command: Option<CommandType>,
@@ -76,7 +84,7 @@ fn main() {
         }
     }
 
-    let mut progress = FrontendProgress::new();
+    progress::set_boxed_progress(Box::new(FrontendProgress::new()));
 
     match log::set_boxed_logger(Box::new(FrontendLogger)) {
         Ok(()) => log::set_max_level(if args.verbose {
@@ -89,13 +97,13 @@ fn main() {
         }
     };
 
-    progress.increment_target(ProgressType::Setup, 2);
+    progress::increment_target(ProgressType::Setup, 2);
 
     let config = get_config();
-    progress.increment_completed(ProgressType::Setup, 1);
+    progress::increment_completed(ProgressType::Setup, 1);
 
     let mut db = get_db();
-    progress.increment_completed(ProgressType::Setup, 1);
+    progress::increment_completed(ProgressType::Setup, 1);
 
     if let Some(command) = args.command {
         let result: Result<Vec<action::Action>, String> = match command {
@@ -116,7 +124,6 @@ fn main() {
                     packages,
                     &mut package_finder,
                     &reinstall_options,
-                    &mut progress,
                     &mut db,
                 )
                 .map_err(|e| e.to_string())
@@ -124,14 +131,13 @@ fn main() {
             CommandType::Remove {
                 packages,
                 recursive,
-            } => commands::remove_packages(packages, recursive, &mut progress, &mut db)
-                .map_err(|e| e.to_string()),
+            } => commands::remove_packages(packages, recursive, &mut db).map_err(|e| e.to_string()),
             CommandType::Update { system, packages } => {
                 let mut package_finder = DefaultPackageFinder::new(false, &config);
                 if system {
-                    commands::update_all_packages(&mut package_finder, &mut progress, &mut db)
+                    commands::update_all_packages(&mut package_finder, &mut db)
                 } else {
-                    commands::update_packages(packages, &mut package_finder, &mut progress, &mut db)
+                    commands::update_packages(packages, &mut package_finder, &mut db)
                 }
             }
             .map_err(|e| e.to_string()),
@@ -146,28 +152,14 @@ fn main() {
 
         match result {
             Ok(actions) => {
-                trace!("Performing actions: {actions:#?}");
-
-                // If no actions need to be performed the actions progress would be 0/0 which is
-                // treated as 0% completed by the current implementaion. Setting it 1/1 will
-                // prevent the end screen having non 100% completion even if everything is
-                // completed
-                if actions.is_empty() {
-                    progress.set_comleted(progress::ProgressType::Actions);
+                if let Err(error) = build_actions(actions.clone(), args.build_threads.unwrap_or(3))
+                {
+                    error!("Error whire building actions: {error}");
+                    exit(-1);
                 }
-
-                progress.increment_target(ProgressType::Actions, actions.len() as i32);
-
-                for mut action in actions {
-                    trace!("Commiting action {action}");
-                    if let Err(error) = action.commit("/var/lib/japm/install_pkgs", &mut db) {
-                        error!("Could not commit action:\n{error}");
-                    } else {
-                        trace!("Commited action");
-                    }
-
-                    progress.increment_completed(ProgressType::Actions, 1);
-                    frontends::display_action(&action);
+                if let Err(error) = commit_actions(actions, &mut db) {
+                    error!("Error whire building actions: {error}");
+                    exit(-1);
                 }
             }
             Err(error_message) => {
@@ -178,6 +170,79 @@ fn main() {
     }
 
     exit(0);
+}
+
+fn build_actions(actions: Vec<Action>, threads: usize) -> Result<(), action::BuildError> {
+    let thread_pool = ThreadPool::new(threads);
+
+    if actions.is_empty() {
+        progress::set_comleted(progress::ProgressType::ActionsBuild);
+    } else {
+        progress::increment_target(ProgressType::ActionsBuild, actions.len() as i32);
+    }
+
+    let build_error: Arc<Mutex<Option<BuildError>>> = Arc::new(Mutex::new(None));
+
+    for mut action in actions {
+        let build_error = build_error.clone();
+        thread_pool.execute(move || {
+            if build_error
+                .lock()
+                .expect("Could not lock shared thread error")
+                .is_some()
+            {
+                return;
+            }
+
+            trace!("Commiting action {action}");
+            if let Err(error) = action.build("/var/lib/japm/install_pkgs") {
+                let mut build_error = build_error
+                    .lock()
+                    .expect("Could not lock shared thread error");
+
+                *build_error = Some(error);
+            }
+
+            progress::increment_completed(ProgressType::ActionsBuild, 1);
+            frontends::display_action(&action);
+        });
+    }
+
+    thread_pool.join();
+
+    let build_error = build_error
+        .lock()
+        .expect("Could not lock shared thread error")
+        .take();
+
+    if let Some(error) = build_error {
+        Err(error)
+    } else {
+        Ok(())
+    }
+}
+
+fn commit_actions<DB, EDatabaseAdd, EDatabaseRemove>(
+    actions: Vec<Action>,
+    db: &mut DB,
+) -> Result<(), action::CommitError<EDatabaseAdd, EDatabaseRemove>>
+where
+    EDatabaseAdd: Display,
+    EDatabaseRemove: Display,
+    DB: PackagesDb<AddError = EDatabaseAdd, RemoveError = EDatabaseRemove>,
+{
+    if actions.is_empty() {
+        progress::set_comleted(progress::ProgressType::ActionsCommit);
+    } else {
+        progress::increment_target(ProgressType::ActionsCommit, actions.len() as i32);
+    }
+
+    for action in actions {
+        action.commit(db)?;
+        progress::increment_completed(ProgressType::ActionsCommit, 1);
+    }
+
+    Ok(())
 }
 
 fn get_config() -> Config {

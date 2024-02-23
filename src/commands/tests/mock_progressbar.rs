@@ -1,4 +1,4 @@
-use super::{Progress, ProgressType};
+use crate::progress::{Progress, ProgressType};
 
 pub struct MockProgressbar;
 

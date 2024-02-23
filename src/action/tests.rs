@@ -11,7 +11,8 @@ fn test_package_installs() {
 
     let mut action = Action::Install(remote_package.clone());
 
-    assert!(action.commit("/tmp/japm/test", &mut mock_db).is_ok());
+    assert!(action.build("/tmp/japm/test").is_ok());
+    assert!(action.commit(&mut mock_db).is_ok());
 
     assert!(mock_db
         .get_package(&remote_package.package_data.name)
@@ -36,7 +37,8 @@ fn test_package_removes() {
 
     let mut action = Action::Remove(local_package);
 
-    assert!(action.commit("/tmp/japm/test", &mut mock_db).is_ok());
+    assert!(action.build("/tmp/japm/test").is_ok());
+    assert!(action.commit(&mut mock_db).is_ok());
     assert!(mock_db.get_package(&package_name).unwrap().is_none());
 }
 

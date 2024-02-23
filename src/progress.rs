@@ -1,9 +1,13 @@
+use std::sync::{Mutex, MutexGuard};
+
 use crate::frontends;
 
+#[derive(Debug)]
 pub enum ProgressType {
     Setup,
     Packages,
-    Actions,
+    ActionsBuild,
+    ActionsCommit,
 }
 pub trait Progress {
     fn increment_target(&mut self, progress_type: ProgressType, amount: i32);
@@ -15,7 +19,8 @@ pub trait Progress {
 pub struct FrontendProgress {
     setup: ProgressGroup,
     packages: ProgressGroup,
-    actions: ProgressGroup,
+    actions_build: ProgressGroup,
+    actions_commit: ProgressGroup,
 }
 
 struct ProgressGroup {
@@ -28,15 +33,17 @@ impl FrontendProgress {
         FrontendProgress {
             setup: ProgressGroup::new(),
             packages: ProgressGroup::new(),
-            actions: ProgressGroup::new(),
+            actions_build: ProgressGroup::new(),
+            actions_commit: ProgressGroup::new(),
         }
     }
 
     pub fn refresh(&self) {
-        let multiplier = 1.0 / 3.0;
+        let multiplier = 1.0 / 4.0;
         let progress: f32 = self.setup.get_progress() * multiplier
             + self.packages.get_progress() * multiplier
-            + self.actions.get_progress() * multiplier;
+            + self.actions_build.get_progress() * multiplier
+            + self.actions_commit.get_progress() * multiplier;
 
         frontends::set_progressbar(progress);
     }
@@ -45,7 +52,8 @@ impl FrontendProgress {
         match progress_type {
             ProgressType::Setup => &mut self.setup,
             ProgressType::Packages => &mut self.packages,
-            ProgressType::Actions => &mut self.actions,
+            ProgressType::ActionsBuild => &mut self.actions_build,
+            ProgressType::ActionsCommit => &mut self.actions_commit,
         }
     }
 }
@@ -81,5 +89,34 @@ impl ProgressGroup {
         } else {
             self.completed as f32 / self.target as f32
         }
+    }
+}
+
+static mut CURRENT_PROGRESS: Option<Mutex<Box<dyn Progress>>> = None;
+
+pub fn set_boxed_progress(progress: Box<dyn Progress>) {
+    unsafe {
+        CURRENT_PROGRESS = Some(Mutex::new(progress));
+    }
+}
+
+pub fn increment_target(progress_type: ProgressType, amount: i32) {
+    get_progress().increment_target(progress_type, amount)
+}
+pub fn increment_completed(progress_type: ProgressType, amount: i32) {
+    get_progress().increment_completed(progress_type, amount)
+}
+pub fn set_comleted(progress_type: ProgressType) {
+    get_progress().set_comleted(progress_type)
+}
+
+fn get_progress<'a>() -> MutexGuard<'a, Box<dyn Progress>> {
+    unsafe {
+        #[allow(clippy::mut_mutex_lock)]
+        CURRENT_PROGRESS
+            .as_mut()
+            .unwrap()
+            .lock()
+            .expect("Could not lock progress")
     }
 }

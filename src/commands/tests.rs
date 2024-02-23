@@ -11,14 +11,13 @@ mod mock_progressbar;
 
 #[test]
 fn test_install_actions_generated_succesfully() {
-    let (mut mock_db, mut package_finder, mut progress) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
     let install_result = commands::install_packages(
         vec![remote_package.package_data.name.clone()],
         &mut package_finder,
         &ReinstallOptions::Ignore,
-        &mut progress,
         &mut mock_db,
     );
 
@@ -27,24 +26,20 @@ fn test_install_actions_generated_succesfully() {
 
 #[test]
 fn test_remove_package_actions_generated_succesfully() {
-    let (mut mock_db, mut package_finder, mut progress) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
     let local_package = mock_install(&mut mock_db, &remote_package);
 
-    let remove_result = commands::remove_packages(
-        vec![remote_package.package_data.name],
-        false,
-        &mut progress,
-        &mut mock_db,
-    );
+    let remove_result =
+        commands::remove_packages(vec![remote_package.package_data.name], false, &mut mock_db);
 
     assert_actions(remove_result, vec![Action::Remove(local_package)]);
 }
 
 #[test]
 fn test_installed_package_is_ignored() {
-    let (mut mock_db, mut package_finder, mut progress) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
     mock_install(&mut mock_db, &remote_package);
@@ -53,7 +48,6 @@ fn test_installed_package_is_ignored() {
         vec![remote_package.package_data.name.clone()],
         &mut package_finder,
         &ReinstallOptions::Ignore,
-        &mut progress,
         &mut mock_db,
     );
 
@@ -62,7 +56,7 @@ fn test_installed_package_is_ignored() {
 
 #[test]
 fn test_installed_package_is_updated() {
-    let (mut mock_db, mut package_finder, mut progress) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
     let package_name = remote_package.package_data.name.clone();
@@ -76,7 +70,6 @@ fn test_installed_package_is_updated() {
         vec![package_name],
         &mut package_finder,
         &ReinstallOptions::Update,
-        &mut progress,
         &mut mock_db,
     );
 
@@ -91,7 +84,7 @@ fn test_installed_package_is_updated() {
 
 #[test]
 fn test_latest_ver_installed_package_is_ignored() {
-    let (mut mock_db, mut package_finder, mut progress) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
     mock_install(&mut mock_db, &remote_package);
@@ -100,7 +93,6 @@ fn test_latest_ver_installed_package_is_ignored() {
         vec![remote_package.package_data.name.clone()],
         &mut package_finder,
         &ReinstallOptions::Update,
-        &mut progress,
         &mut mock_db,
     );
 
@@ -109,7 +101,7 @@ fn test_latest_ver_installed_package_is_ignored() {
 
 #[test]
 fn test_installed_package_is_reinstalled() {
-    let (mut mock_db, mut package_finder, mut progress) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let remote_package = package_finder.get_simple_packge();
 
     let local_package = mock_install(&mut mock_db, &remote_package);
@@ -118,7 +110,6 @@ fn test_installed_package_is_reinstalled() {
         vec![remote_package.package_data.name.clone()],
         &mut package_finder,
         &ReinstallOptions::ForceReinstall,
-        &mut progress,
         &mut mock_db,
     );
 
@@ -133,7 +124,7 @@ fn test_installed_package_is_reinstalled() {
 
 #[test]
 fn test_remove_package_with_depending_packages_is_not_allowed() {
-    let (mut mock_db, mut package_finder, mut progress) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let package_with_dependency = package_finder.get_package_with_dependency();
     let package_dependency = package_finder
         .find_package(&package_with_dependency.dependencies[0])
@@ -146,7 +137,6 @@ fn test_remove_package_with_depending_packages_is_not_allowed() {
     let remove_result = commands::remove_packages(
         vec![package_dependency.package_data.name],
         false,
-        &mut progress,
         &mut mock_db,
     );
 
@@ -159,7 +149,7 @@ fn test_remove_package_with_depending_packages_is_not_allowed() {
 
 #[test]
 fn test_remove_package_removes_depending() {
-    let (mut mock_db, mut package_finder, mut progress) = get_mocks();
+    let (mut mock_db, mut package_finder) = get_mocks();
     let package_with_dependency = package_finder.get_package_with_dependency();
     let package_dependency = package_finder
         .find_package(&package_with_dependency.dependencies[0])
@@ -175,7 +165,6 @@ fn test_remove_package_removes_depending() {
     let remove_result = commands::remove_packages(
         vec![package_dependency.package_data.name],
         true,
-        &mut progress,
         &mut mock_db,
     );
 
@@ -205,10 +194,7 @@ fn mock_install(db: &mut MockPackagesDb, remote_package: &RemotePackage) -> Loca
         .unwrap()
 }
 
-fn get_mocks() -> (MockPackagesDb, MockPackageFinder, MockProgressbar) {
-    (
-        MockPackagesDb::new(),
-        MockPackageFinder::new(),
-        MockProgressbar,
-    )
+fn get_mocks() -> (MockPackagesDb, MockPackageFinder) {
+    progress::set_boxed_progress(Box::new(MockProgressbar));
+    (MockPackagesDb::new(), MockPackageFinder::new())
 }

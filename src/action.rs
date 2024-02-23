@@ -29,7 +29,7 @@ impl Display for Action {
 }
 
 #[derive(Error, Debug)]
-pub enum Error<EDatabaseAdd: Display, EDatabaseRemove: Display> {
+pub enum BuildError {
     #[error("Could not parse command: {0}")]
     Parse(#[from] shell_words::ParseError),
 
@@ -41,7 +41,10 @@ pub enum Error<EDatabaseAdd: Display, EDatabaseRemove: Display> {
 
     #[error("Command {0} failed with exit code {1} and stderr:\n{2}")]
     CommandFail(String, i32, String),
+}
 
+#[derive(Error, Debug)]
+pub enum CommitError<EDatabaseAdd: Display, EDatabaseRemove: Display> {
     #[error("Failed to add package to database:\n{0}")]
     DatabaseAdd(EDatabaseAdd),
 
@@ -50,25 +53,32 @@ pub enum Error<EDatabaseAdd: Display, EDatabaseRemove: Display> {
 }
 
 impl Action {
-    pub fn commit<EDatabaseAdd: Display, EDatabaseRemove: Display>(
-        &mut self,
-        package_build_path: &str,
-        db: &mut impl PackagesDb<AddError = EDatabaseAdd, RemoveError = EDatabaseRemove>,
-    ) -> Result<(), Error<EDatabaseAdd, EDatabaseRemove>> {
-        debug!("Action commit {self}");
-
+    pub fn build(&mut self, package_build_path: &str) -> Result<(), BuildError> {
         match self {
             Action::Install(ref mut package) => {
                 install_package(package, package_build_path)?;
-                if let Err(error) = db.add_package(package) {
-                    return Err(Error::DatabaseAdd(error));
-                }
             }
             Action::Remove(ref mut package) => {
                 remove_package(package)?;
+            }
+        };
 
+        Ok(())
+    }
+
+    pub fn commit<EDatabaseAdd: Display, EDatabaseRemove: Display>(
+        &self,
+        db: &mut impl PackagesDb<AddError = EDatabaseAdd, RemoveError = EDatabaseRemove>,
+    ) -> Result<(), CommitError<EDatabaseAdd, EDatabaseRemove>> {
+        match self {
+            Action::Install(ref package) => {
+                if let Err(error) = db.add_package(package) {
+                    return Err(CommitError::DatabaseAdd(error));
+                }
+            }
+            Action::Remove(ref package) => {
                 if let Err(error) = db.remove_package(&package.package_data.name) {
-                    return Err(Error::DatabaseRemove(error));
+                    return Err(CommitError::DatabaseRemove(error));
                 }
             }
         };
@@ -77,10 +87,10 @@ impl Action {
     }
 }
 
-fn install_package<EDatabaseAdd: Display, EDatabaseRemove: Display>(
+fn install_package(
     package: &mut RemotePackage,
     package_build_path: &str,
-) -> Result<(), Error<EDatabaseAdd, EDatabaseRemove>> {
+) -> Result<(), BuildError> {
     let install_directory = format!("{}/{}", package_build_path, package.package_data.name);
 
     if fs::metadata(&install_directory).is_ok() {
@@ -112,9 +122,7 @@ fn install_package<EDatabaseAdd: Display, EDatabaseRemove: Display>(
     Ok(())
 }
 
-fn remove_package<EDatabaseAdd: Display, EDatabaseRemove: Display>(
-    package: &LocalPackage,
-) -> Result<(), Error<EDatabaseAdd, EDatabaseRemove>> {
+fn remove_package(package: &LocalPackage) -> Result<(), BuildError> {
     run_commands(&package.pre_remove, "/")?;
     delete_package_files(&package.package_files)?;
     run_commands(&package.post_remove, "/")?;
@@ -185,10 +193,7 @@ fn delete_package_files(package_files: &[String]) -> Result<(), io::Error> {
     Ok(())
 }
 
-fn run_commands<EDatabaseAdd: Display, EDatabaseRemove: Display>(
-    commands: &Vec<String>,
-    directory: &str,
-) -> Result<(), Error<EDatabaseAdd, EDatabaseRemove>> {
+fn run_commands(commands: &Vec<String>, directory: &str) -> Result<(), BuildError> {
     for command in commands {
         debug!("Running command {command}");
 
@@ -205,13 +210,10 @@ fn run_commands<EDatabaseAdd: Display, EDatabaseRemove: Display>(
     Ok(())
 }
 
-fn run_command<EDatabaseAdd: Display, EDatabaseRemove: Display>(
-    command: &str,
-    directory: &str,
-) -> Result<(String, String), Error<EDatabaseAdd, EDatabaseRemove>> {
+fn run_command(command: &str, directory: &str) -> Result<(String, String), BuildError> {
     let args = shell_words::split(command)?;
     if args.is_empty() {
-        return Err(Error::InvalidCommand(
+        return Err(BuildError::InvalidCommand(
             String::from(command),
             String::from("Cannot have 0 arguments"),
         ));
@@ -234,9 +236,9 @@ fn run_command<EDatabaseAdd: Display, EDatabaseRemove: Display>(
 
     if !result.status.success() {
         match result.status.code() {
-            Some(code) => return Err(Error::CommandFail(String::from(command), code, stderr)),
+            Some(code) => return Err(BuildError::CommandFail(String::from(command), code, stderr)),
             None => {
-                return Err(Error::CommandFail(
+                return Err(BuildError::CommandFail(
                     String::from(command),
                     80085,
                     String::from("Command failed but could not get the status code."),
