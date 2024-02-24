@@ -1,5 +1,7 @@
 use super::*;
 
+use tokio::test;
+
 use crate::commands;
 
 use crate::test_helpers::MockPackagesDb;
@@ -10,37 +12,39 @@ mod mock_package_finder;
 mod mock_progressbar;
 
 #[test]
-fn test_install_actions_generated_succesfully() {
+async fn test_install_actions_generated_succesfully() {
     let (mut mock_db, mut package_finder) = get_mocks();
-    let remote_package = package_finder.get_simple_packge();
+    let remote_package = package_finder.get_simple_packge().await;
 
     let install_result = commands::install_packages(
         vec![remote_package.package_data.name.clone()],
         &mut package_finder,
         &ReinstallOptions::Ignore,
         &mut mock_db,
-    );
+    )
+    .await;
 
     assert_actions(install_result, vec![Action::Install(remote_package)]);
 }
 
 #[test]
-fn test_remove_package_actions_generated_succesfully() {
+async fn test_remove_package_actions_generated_succesfully() {
     let (mut mock_db, mut package_finder) = get_mocks();
-    let remote_package = package_finder.get_simple_packge();
+    let remote_package = package_finder.get_simple_packge().await;
 
     let local_package = mock_install(&mut mock_db, &remote_package);
 
     let remove_result =
-        commands::remove_packages(vec![remote_package.package_data.name], false, &mut mock_db);
+        commands::remove_packages(vec![remote_package.package_data.name], false, &mut mock_db)
+            .await;
 
     assert_actions(remove_result, vec![Action::Remove(local_package)]);
 }
 
 #[test]
-fn test_installed_package_is_ignored() {
+async fn test_installed_package_is_ignored() {
     let (mut mock_db, mut package_finder) = get_mocks();
-    let remote_package = package_finder.get_simple_packge();
+    let remote_package = package_finder.get_simple_packge().await;
 
     mock_install(&mut mock_db, &remote_package);
 
@@ -49,29 +53,31 @@ fn test_installed_package_is_ignored() {
         &mut package_finder,
         &ReinstallOptions::Ignore,
         &mut mock_db,
-    );
+    )
+    .await;
 
     assert_actions(install_result, vec![]);
 }
 
 #[test]
-fn test_installed_package_is_updated() {
+async fn test_installed_package_is_updated() {
     let (mut mock_db, mut package_finder) = get_mocks();
-    let remote_package = package_finder.get_simple_packge();
+    let remote_package = package_finder.get_simple_packge().await;
 
     let package_name = remote_package.package_data.name.clone();
 
     let local_packge = mock_install(&mut mock_db, &remote_package);
 
     package_finder.update_remote_package_version(&package_name);
-    let remote_package = package_finder.get_simple_packge();
+    let remote_package = package_finder.get_simple_packge().await;
 
     let install_result = commands::install_packages(
         vec![package_name],
         &mut package_finder,
         &ReinstallOptions::Update,
         &mut mock_db,
-    );
+    )
+    .await;
 
     assert_actions(
         install_result,
@@ -83,9 +89,9 @@ fn test_installed_package_is_updated() {
 }
 
 #[test]
-fn test_latest_ver_installed_package_is_ignored() {
+async fn test_latest_ver_installed_package_is_ignored() {
     let (mut mock_db, mut package_finder) = get_mocks();
-    let remote_package = package_finder.get_simple_packge();
+    let remote_package = package_finder.get_simple_packge().await;
 
     mock_install(&mut mock_db, &remote_package);
 
@@ -94,15 +100,16 @@ fn test_latest_ver_installed_package_is_ignored() {
         &mut package_finder,
         &ReinstallOptions::Update,
         &mut mock_db,
-    );
+    )
+    .await;
 
     assert_actions(install_result, vec![]);
 }
 
 #[test]
-fn test_installed_package_is_reinstalled() {
+async fn test_installed_package_is_reinstalled() {
     let (mut mock_db, mut package_finder) = get_mocks();
-    let remote_package = package_finder.get_simple_packge();
+    let remote_package = package_finder.get_simple_packge().await;
 
     let local_package = mock_install(&mut mock_db, &remote_package);
 
@@ -111,7 +118,8 @@ fn test_installed_package_is_reinstalled() {
         &mut package_finder,
         &ReinstallOptions::ForceReinstall,
         &mut mock_db,
-    );
+    )
+    .await;
 
     assert_actions(
         install_result,
@@ -123,11 +131,12 @@ fn test_installed_package_is_reinstalled() {
 }
 
 #[test]
-fn test_remove_package_with_depending_packages_is_not_allowed() {
+async fn test_remove_package_with_depending_packages_is_not_allowed() {
     let (mut mock_db, mut package_finder) = get_mocks();
-    let package_with_dependency = package_finder.get_package_with_dependency();
+    let package_with_dependency = package_finder.get_package_with_dependency().await;
     let package_dependency = package_finder
         .find_package(&package_with_dependency.dependencies[0])
+        .await
         .unwrap()
         .unwrap();
 
@@ -138,7 +147,8 @@ fn test_remove_package_with_depending_packages_is_not_allowed() {
         vec![package_dependency.package_data.name],
         false,
         &mut mock_db,
-    );
+    )
+    .await;
 
     assert!(remove_result.is_err());
     assert!(matches!(
@@ -148,11 +158,12 @@ fn test_remove_package_with_depending_packages_is_not_allowed() {
 }
 
 #[test]
-fn test_remove_package_removes_depending() {
+async fn test_remove_package_removes_depending() {
     let (mut mock_db, mut package_finder) = get_mocks();
-    let package_with_dependency = package_finder.get_package_with_dependency();
+    let package_with_dependency = package_finder.get_package_with_dependency().await;
     let package_dependency = package_finder
         .find_package(&package_with_dependency.dependencies[0])
+        .await
         .unwrap()
         .unwrap();
 
@@ -166,7 +177,8 @@ fn test_remove_package_removes_depending() {
         vec![package_dependency.package_data.name],
         true,
         &mut mock_db,
-    );
+    )
+    .await;
 
     assert_actions(
         remove_result,

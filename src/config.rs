@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::fs;
 use std::io;
 use std::path::Path;
+
+use tokio::fs;
 
 use serde_json::Value as JsonValue;
 
@@ -34,7 +35,7 @@ pub enum Error {
 }
 
 impl Config {
-    pub fn create_default_config_if_necessary(config_path: &str) -> Result<bool, io::Error> {
+    pub async fn create_default_config_if_necessary(config_path: &str) -> Result<bool, io::Error> {
         trace!("Creating default configs if necessary");
 
         let config_path = Path::new(config_path);
@@ -43,24 +44,24 @@ impl Config {
             true => Ok(false),
             false => {
                 trace!("Creating config file parent directories.");
-                fs::create_dir_all(config_path.parent().unwrap())?;
+                tokio::fs::create_dir_all(config_path.parent().unwrap()).await?;
 
                 trace!("Creating config file.");
-                fs::File::create(config_path)?;
+                fs::File::create(config_path).await?;
 
                 Ok(true)
             }
         }
     }
 
-    pub fn write_default_config(config_path: &str) -> Result<(), io::Error> {
-        fs::write(config_path, DEFAULT_CONFIG)
+    pub async fn write_default_config(config_path: &str) -> Result<(), io::Error> {
+        fs::write(config_path, DEFAULT_CONFIG).await
     }
 
-    pub fn from_file(config_path: &str) -> Result<Config, Error> {
+    pub async fn from_file(config_path: &str) -> Result<Config, Error> {
         trace!("Parsing configs");
 
-        let config_content = fs::read_to_string(config_path)?;
+        let config_content = fs::read_to_string(config_path).await?;
 
         Self::from_json(&config_content)
     }

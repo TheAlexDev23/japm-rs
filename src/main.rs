@@ -1,18 +1,19 @@
 use std::fmt::Display;
-use std::sync::{Arc, Mutex};
+
+use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use tokio::join;
 
 use clap::{ArgAction, Parser, Subcommand};
 
 use log::{debug, error, info};
 
-use action::{Action, BuildError};
+use action::Action;
 use config::Config;
 use db::{PackagesDb, SqlitePackagesDb};
 use default_package_finder::DefaultPackageFinder;
 use frontends::{StdFrontend, TuiFrontend};
 use logger::FrontendLogger;
 use progress::{FrontendProgress, ProgressType};
-use threadpool::ThreadPool;
 
 mod action;
 mod commands;
@@ -34,7 +35,6 @@ struct Args {
     verbose: bool,
     #[arg(long, action=ArgAction::SetTrue)]
     no_tui: bool,
-    build_threads: Option<usize>,
     #[command(subcommand)]
     /// Command to perform
     command: Option<CommandType>,
@@ -66,7 +66,8 @@ enum CommandType {
 
 static mut GATHER_KEY_BEFORE_EXIT: bool = false;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
 
     if args.no_tui {
@@ -95,13 +96,7 @@ fn main() {
         }
     };
 
-    progress::increment_target(ProgressType::Setup, 2);
-
-    let config = get_config();
-    progress::increment_completed(ProgressType::Setup, 1);
-
-    let mut db = get_db();
-    progress::increment_completed(ProgressType::Setup, 1);
+    let (config, mut db) = join!(get_config(), get_db());
 
     if let Some(command) = args.command {
         debug!("Generating actions for command {command:?}");
@@ -125,18 +120,21 @@ fn main() {
                     &reinstall_options,
                     &mut db,
                 )
+                .await
                 .map_err(|e| e.to_string())
             }
             CommandType::Remove {
                 packages,
                 recursive,
-            } => commands::remove_packages(packages, recursive, &mut db).map_err(|e| e.to_string()),
+            } => commands::remove_packages(packages, recursive, &mut db)
+                .await
+                .map_err(|e| e.to_string()),
             CommandType::Update { system, packages } => {
                 let mut package_finder = DefaultPackageFinder::new(false, &config);
                 if system {
-                    commands::update_all_packages(&mut package_finder, &mut db)
+                    commands::update_all_packages(&mut package_finder, &mut db).await
                 } else {
-                    commands::update_packages(packages, &mut package_finder, &mut db)
+                    commands::update_packages(packages, &mut package_finder, &mut db).await
                 }
             }
             .map_err(|e| e.to_string()),
@@ -152,8 +150,7 @@ fn main() {
         match result {
             // TODO: make a pretty actions display screen
             Ok(actions) => {
-                if let Err(error) = build_actions(actions.clone(), args.build_threads.unwrap_or(3))
-                {
+                if let Err(error) = build_actions(actions.clone()) {
                     error!("Error while building actions: {error}");
                     exit(-1);
                 }
@@ -172,13 +169,15 @@ fn main() {
     exit(0);
 }
 
-fn get_config() -> Config {
+async fn get_config() -> Config {
     const CONFIG_PATH: &str = "/etc/japm/config.json";
 
-    match Config::create_default_config_if_necessary(CONFIG_PATH) {
+    progress::increment_target(ProgressType::Setup, 1);
+
+    match Config::create_default_config_if_necessary(CONFIG_PATH).await {
         Ok(created) => {
             if created {
-                if let Err(error) = Config::write_default_config(CONFIG_PATH) {
+                if let Err(error) = Config::write_default_config(CONFIG_PATH).await {
                     error!("Could not write default config: {error}");
                     exit(-1);
                 }
@@ -190,8 +189,11 @@ fn get_config() -> Config {
         }
     }
 
-    match Config::from_file(CONFIG_PATH) {
-        Ok(config) => config,
+    match Config::from_file(CONFIG_PATH).await {
+        Ok(config) => {
+            progress::increment_completed(ProgressType::Setup, 1);
+            config
+        }
         Err(error) => {
             error!("Could not get config: {error}");
             exit(-1);
@@ -199,8 +201,9 @@ fn get_config() -> Config {
     }
 }
 
-fn get_db() -> SqlitePackagesDb {
-    match SqlitePackagesDb::create_db_file_if_necessary() {
+async fn get_db() -> SqlitePackagesDb {
+    progress::increment_target(ProgressType::Setup, 1);
+    match SqlitePackagesDb::create_db_file_if_necessary().await {
         Ok(created) => {
             let mut db = match SqlitePackagesDb::new() {
                 Ok(db) => db,
@@ -217,6 +220,7 @@ fn get_db() -> SqlitePackagesDb {
                 }
             }
 
+            progress::increment_completed(ProgressType::Setup, 1);
             db
         }
         Err(error) => {
@@ -226,54 +230,21 @@ fn get_db() -> SqlitePackagesDb {
     }
 }
 
-fn build_actions(actions: Vec<Action>, threads: usize) -> Result<(), action::BuildError> {
-    let thread_pool = ThreadPool::new(threads);
-    debug!("Building actions with {threads} threads");
-
+fn build_actions(mut actions: Vec<Action>) -> Result<(), action::BuildError> {
     if actions.is_empty() {
         progress::set_comleted(progress::ProgressType::ActionsBuild);
     } else {
         progress::increment_target(ProgressType::ActionsBuild, actions.len() as i32);
     }
 
-    let build_error: Arc<Mutex<Option<BuildError>>> = Arc::new(Mutex::new(None));
-
-    for mut action in actions {
-        let build_error = build_error.clone();
-        thread_pool.execute(move || {
-            if build_error
-                .lock()
-                .expect("Could not lock shared thread error")
-                .is_some()
-            {
-                return;
-            }
-
-            if let Err(error) = action.build("/var/lib/japm/install_pkgs") {
-                let mut build_error = build_error
-                    .lock()
-                    .expect("Could not lock shared thread error");
-
-                *build_error = Some(error);
-            }
-
+    actions
+        .par_iter_mut()
+        .try_for_each(|action| -> Result<(), action::BuildError> {
+            action.build("/var/lib/japm/install_pkgs")?;
             progress::increment_completed(ProgressType::ActionsBuild, 1);
-            frontends::display_action(&action);
-        });
-    }
-
-    thread_pool.join();
-
-    let build_error = build_error
-        .lock()
-        .expect("Could not lock shared thread error")
-        .take();
-
-    if let Some(error) = build_error {
-        Err(error)
-    } else {
-        Ok(())
-    }
+            frontends::display_action(action);
+            Ok(())
+        })
 }
 
 fn commit_actions<DB, EDatabaseAdd, EDatabaseRemove>(

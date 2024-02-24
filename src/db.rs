@@ -1,7 +1,9 @@
 use std::fmt::Display;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io;
 use std::path::Path;
+
+use tokio::fs;
 
 use log::{info, trace};
 
@@ -97,7 +99,7 @@ impl SqlitePackagesDb {
         Ok(SqlitePackagesDb { connection })
     }
 
-    pub fn create_db_file_if_necessary() -> Result<bool, io::Error> {
+    pub async fn create_db_file_if_necessary() -> Result<bool, io::Error> {
         trace!("Creating db file if necessary");
 
         let database_path = Path::new(DATABASE_SOURCE);
@@ -109,7 +111,7 @@ impl SqlitePackagesDb {
                 trace!("Creating database parent directory");
 
                 // Hardcoded directory allways has parent, unwrap is ok
-                fs::create_dir_all(database_path.parent().unwrap())?;
+                fs::create_dir_all(database_path.parent().unwrap()).await?;
 
                 trace!("Creating database file");
                 File::create(DATABASE_SOURCE)?;

@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use async_recursion::async_recursion;
+
 use log::{debug, info, trace};
 
 use linked_hash_map::LinkedHashMap;
@@ -22,7 +24,10 @@ mod tests;
 
 pub trait PackageFinder {
     type Error: Display;
-    fn find_package(&mut self, package_name: &str) -> Result<Option<RemotePackage>, Self::Error>;
+    async fn find_package(
+        &mut self,
+        package_name: &str,
+    ) -> Result<Option<RemotePackage>, Self::Error>;
 }
 
 pub enum ReinstallOptions {
@@ -31,7 +36,7 @@ pub enum ReinstallOptions {
     Ignore,
 }
 
-pub fn install_packages<EFind: Display, EDatabase: Display>(
+pub async fn install_packages<EFind: Display, EDatabase: Display>(
     packages: Vec<String>,
     package_finder: &mut impl PackageFinder<Error = EFind>,
     reinstall_options: &ReinstallOptions,
@@ -42,12 +47,7 @@ pub fn install_packages<EFind: Display, EDatabase: Display>(
     progress::increment_target(ProgressType::Packages, packages.len() as i32);
 
     for package_name in packages.iter() {
-        actions.extend(install_package(
-            package_name,
-            package_finder,
-            reinstall_options,
-            db,
-        )?);
+        actions.extend(install_package(package_name, package_finder, reinstall_options, db).await?);
 
         progress::increment_completed(ProgressType::Packages, 1);
     }
@@ -55,7 +55,7 @@ pub fn install_packages<EFind: Display, EDatabase: Display>(
     Ok(actions.keys().cloned().collect())
 }
 
-pub fn remove_packages<EDatabase: Display>(
+pub async fn remove_packages<EDatabase: Display>(
     package_names: Vec<String>,
     recursive: bool,
     db: &mut impl PackagesDb<GetError = EDatabase>,
@@ -72,7 +72,7 @@ pub fn remove_packages<EDatabase: Display>(
     Ok(actions.keys().cloned().collect())
 }
 
-pub fn update_all_packages<EDatabase: Display, EFind: Display>(
+pub async fn update_all_packages<EDatabase: Display, EFind: Display>(
     package_finder: &mut impl PackageFinder<Error = EFind>,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<Vec<Action>, UpdateError<EDatabase, EFind>> {
@@ -83,12 +83,12 @@ pub fn update_all_packages<EDatabase: Display, EFind: Display>(
 
     let packages = packages.into_iter().map(|p| p.package_data.name).collect();
 
-    let actions = install_packages(packages, package_finder, &ReinstallOptions::Update, db)?;
+    let actions = install_packages(packages, package_finder, &ReinstallOptions::Update, db).await?;
 
     Ok(actions)
 }
 
-pub fn update_packages<EDatabase: Display, EFind: Display>(
+pub async fn update_packages<EDatabase: Display, EFind: Display>(
     package_names: Vec<String>,
     package_finder: &mut impl PackageFinder<Error = EFind>,
     db: &mut impl PackagesDb<GetError = EDatabase>,
@@ -105,12 +105,15 @@ pub fn update_packages<EDatabase: Display, EFind: Display>(
 
         packages_to_update.push(package_name);
 
-        actions.extend(install_packages(
-            packages_to_update,
-            package_finder,
-            &ReinstallOptions::Update,
-            db,
-        )?);
+        actions.extend(
+            install_packages(
+                packages_to_update,
+                package_finder,
+                &ReinstallOptions::Update,
+                db,
+            )
+            .await?,
+        );
     }
 
     Ok(actions)
@@ -140,7 +143,8 @@ pub fn print_package_info<EDatabase: Display>(
     Ok(())
 }
 
-fn install_package<EFind: Display, EDatabase: Display>(
+#[async_recursion(?Send)]
+async fn install_package<EFind: Display, EDatabase: Display>(
     package_name: &str,
     package_finder: &mut impl PackageFinder<Error = EFind>,
     reinstall_options: &ReinstallOptions,
@@ -150,7 +154,7 @@ fn install_package<EFind: Display, EDatabase: Display>(
 
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
 
-    let remote_package = match package_finder.find_package(package_name) {
+    let remote_package = match package_finder.find_package(package_name).await {
         Ok(package) => {
             if package.is_none() {
                 return Err(InstallError::PackageNotFound(String::from(package_name)));
@@ -210,12 +214,7 @@ fn install_package<EFind: Display, EDatabase: Display>(
     );
 
     for dependency in remote_package.dependencies.iter() {
-        actions.extend(install_package(
-            dependency,
-            package_finder,
-            reinstall_options,
-            db,
-        )?);
+        actions.extend(install_package(dependency, package_finder, reinstall_options, db).await?);
 
         progress::increment_completed(ProgressType::Packages, 1);
     }

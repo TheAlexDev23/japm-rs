@@ -54,10 +54,7 @@ pub enum CommitError<EDatabaseAdd: Display, EDatabaseRemove: Display> {
 
 impl Action {
     pub fn build(&mut self, package_build_path: &str) -> Result<(), BuildError> {
-        info!(
-            "Building action {self} on thread {:?}",
-            std::thread::current().id()
-        );
+        info!("Building action {self}");
         match self {
             Action::Install(ref mut package) => {
                 install_package(package, package_build_path)?;

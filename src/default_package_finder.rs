@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::fs;
 use std::io;
-use std::io::Read;
+use std::path::Path;
+
+use tokio::fs;
 
 use log::{debug, info, warn};
 
@@ -16,7 +17,9 @@ use crate::package::RemotePackage;
 #[derive(Error, Debug)]
 pub enum PackageFindError {
     #[error("An io error has occured: {0}")]
-    Read(#[from] io::Error),
+    IO(#[from] io::Error),
+    #[error("A network error has occured: {0}")]
+    Reqwest(#[from] reqwest::Error),
     #[error("A json error has occured: {0}")]
     Json(#[from] serde_json::Error),
 }
@@ -37,7 +40,10 @@ impl DefaultPackageFinder {
 }
 impl PackageFinder for DefaultPackageFinder {
     type Error = PackageFindError;
-    fn find_package(&mut self, package_name: &str) -> Result<Option<RemotePackage>, Self::Error> {
+    async fn find_package(
+        &mut self,
+        package_name: &str,
+    ) -> Result<Option<RemotePackage>, Self::Error> {
         info!("Searching for package {package_name}");
 
         if let Some(remote_package) = self.search_cache.get(package_name) {
@@ -46,9 +52,9 @@ impl PackageFinder for DefaultPackageFinder {
         }
 
         let json_content = if self.from_file {
-            find_from_file(package_name)?
+            find_from_file(package_name).await?
         } else {
-            find_from_remote(package_name, &self.remotes)?
+            find_from_remote(package_name, &self.remotes).await?
         };
 
         match json_content {
@@ -63,16 +69,19 @@ impl PackageFinder for DefaultPackageFinder {
     }
 }
 
-fn find_from_file(package_name: &str) -> Result<Option<String>, io::Error> {
-    if fs::metadata(package_name).is_err() {
+async fn find_from_file(package_name: &str) -> Result<Option<String>, io::Error> {
+    if !Path::new(package_name).exists() {
         return Ok(None);
     }
 
-    let json_content = fs::read_to_string(package_name)?;
+    let json_content = fs::read_to_string(package_name).await?;
     Ok(Some(json_content))
 }
 
-fn find_from_remote(package_name: &str, remotes: &[String]) -> Result<Option<String>, io::Error> {
+async fn find_from_remote(
+    package_name: &str,
+    remotes: &[String],
+) -> Result<Option<String>, reqwest::Error> {
     let mut remotes = remotes.iter();
     let json_content = loop {
         let mut remote = match remotes.next() {
@@ -86,24 +95,20 @@ fn find_from_remote(package_name: &str, remotes: &[String]) -> Result<Option<Str
             remote.push_str(format!("packages/{package_name}/package.json").as_str());
         }
 
-        let mut res = match reqwest::blocking::get(&remote) {
+        match reqwest::get(&remote).await {
             Ok(res) => {
                 if res.status() != StatusCode::OK {
                     debug!("Package {package_name} not found in remote {remote}");
                     continue;
                 }
 
-                res
+                break res.text().await?;
             }
             Err(error) => {
                 warn!("Error while attempting to download package:\n{error}");
                 continue;
             }
         };
-
-        let mut body = String::new();
-        res.read_to_string(&mut body)?;
-        break body;
     };
 
     Ok(Some(json_content))
