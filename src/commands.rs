@@ -2,17 +2,17 @@ use std::fmt::Display;
 
 use log::{debug, info, trace};
 
+use linked_hash_map::LinkedHashMap;
+use semver::Version;
+
 use crate::action::Action;
 use crate::db::PackagesDb;
 use crate::package::{LocalPackage, RemotePackage};
 use crate::progress::{self, ProgressType};
 
-use linked_hash_map::LinkedHashMap;
-use semver::Version;
-
 pub use errors::*;
 
-/// A linked hash set allows the guarantee that each element will be only once and the ability to iterate
+/// A linked hash set ensures all items are present once and allows to iterate
 /// in the same order items where inserted.
 type LinkedHashSet<T> = LinkedHashMap<T, ()>;
 
@@ -146,8 +146,9 @@ fn install_package<EFind: Display, EDatabase: Display>(
     reinstall_options: &ReinstallOptions,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<LinkedHashSet<Action>, InstallError<EDatabase, EFind>> {
+    debug!("Generating install actions for package: {package_name}");
+
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
-    trace!("Generating install actions for package: {package_name}");
 
     let remote_package = match package_finder.find_package(package_name) {
         Ok(package) => {
@@ -168,7 +169,7 @@ fn install_package<EFind: Display, EDatabase: Display>(
                 match reinstall_options {
                     ReinstallOptions::ForceReinstall => {
                         info!("Package {package_name} already installed, reinstalling...");
-                        // It's also possible to call remove_package and get the packge removal specific actions.
+                        // It's also possible to call remove_package and get the package removal specific actions.
                         // But this can cause issues.
                         // - First a pointless database query for existance of the packge which is already guaranteed.
                         // - Second, all the recursive removal related issues. We reinstall a package and there's no need to check for dependency
@@ -176,22 +177,15 @@ fn install_package<EFind: Display, EDatabase: Display>(
                         actions.insert(Action::Remove(local_package), ());
                     }
                     ReinstallOptions::Update => {
-                        let remote_version =
-                            match Version::parse(&remote_package.package_data.version) {
-                                Ok(v) => v,
-                                Err(error) => {
-                                    return Err(InstallError::VersionParse(error.to_string()))
-                                }
-                            };
-                        let local_version =
-                            match Version::parse(&local_package.package_data.version) {
-                                Ok(v) => v,
-                                Err(error) => {
-                                    return Err(InstallError::VersionParse(error.to_string()))
-                                }
-                            };
+                        let remote_is_newer = match remote_is_newer(&remote_package, &local_package)
+                        {
+                            Ok(res) => res,
+                            Err(error) => {
+                                return Err(InstallError::VersionParse(error.to_string()))
+                            }
+                        };
 
-                        if remote_version.cmp(&local_version) == std::cmp::Ordering::Greater {
+                        if remote_is_newer {
                             actions.insert(Action::Remove(local_package), ());
                         } else {
                             info!(
@@ -236,9 +230,9 @@ fn remove_package<EDatabase: Display>(
     recursive: bool,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<LinkedHashSet<Action>, RemoveError<EDatabase>> {
-    let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
+    debug!("Generating remove actions for package: {package_name}");
 
-    debug!("Searching initial package {package_name}");
+    let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
 
     let db_package = match db.get_package(package_name) {
         Ok(package) => {
@@ -250,6 +244,8 @@ fn remove_package<EDatabase: Display>(
         Err(error) => return Err(RemoveError::DatabaseGet(error)),
     };
 
+    // Only query for depending packages of 1 level depth as it is enough to verify dependency
+    // break
     let depending_packages = match get_depending(package_name, db, 1) {
         Ok(depending) => depending,
         Err(error) => return Err(RemoveError::DatabaseGet(error)),
@@ -283,10 +279,19 @@ fn remove_package<EDatabase: Display>(
     }
 
     let action = Action::Remove(db_package);
-    trace!("Adding action {action}");
     actions.insert(action, ());
 
     Ok(actions)
+}
+
+fn remote_is_newer(
+    remote_package: &RemotePackage,
+    local_package: &LocalPackage,
+) -> Result<bool, semver::Error> {
+    let remote_version = Version::parse(&remote_package.package_data.version)?;
+    let local_version = Version::parse(&local_package.package_data.version)?;
+
+    Ok(remote_version > local_version)
 }
 
 fn get_depending<EDatabase: Display>(

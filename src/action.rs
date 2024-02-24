@@ -54,6 +54,10 @@ pub enum CommitError<EDatabaseAdd: Display, EDatabaseRemove: Display> {
 
 impl Action {
     pub fn build(&mut self, package_build_path: &str) -> Result<(), BuildError> {
+        info!(
+            "Building action {self} on thread {:?}",
+            std::thread::current().id()
+        );
         match self {
             Action::Install(ref mut package) => {
                 install_package(package, package_build_path)?;
@@ -70,6 +74,7 @@ impl Action {
         &self,
         db: &mut impl PackagesDb<AddError = EDatabaseAdd, RemoveError = EDatabaseRemove>,
     ) -> Result<(), CommitError<EDatabaseAdd, EDatabaseRemove>> {
+        info!("Commiting action {self}");
         match self {
             Action::Install(ref package) => {
                 if let Err(error) = db.add_package(package) {
@@ -109,7 +114,7 @@ fn install_package(
         Path::new("/"),
     )?;
 
-    trace!("Detected package files: {package_files:#?}");
+    debug!("Detected package files: {package_files:#?}");
 
     install_package_files(&package_files)?;
     package.package_files = package_files

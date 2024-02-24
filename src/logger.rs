@@ -20,7 +20,11 @@ impl Log for FrontendLogger {
             Level::Error => MessageColor::Purple,
         };
 
-        for line in message.split('\n').map(String::from) {
+        let mut message = message.split('\n').map(String::from);
+        frontends::display_message(message.next().unwrap(), &color);
+
+        for mut line in message {
+            line.insert_str(0, "    ");
             frontends::display_message(line, &color);
         }
     }

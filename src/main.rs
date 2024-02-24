@@ -1,13 +1,11 @@
-use std::{
-    fmt::Display,
-    sync::{Arc, Mutex},
-};
-
-use action::{Action, BuildError};
-use log::{error, info, trace};
+use std::fmt::Display;
+use std::sync::{Arc, Mutex};
 
 use clap::{ArgAction, Parser, Subcommand};
 
+use log::{debug, error, info};
+
+use action::{Action, BuildError};
 use config::Config;
 use db::{PackagesDb, SqlitePackagesDb};
 use default_package_finder::DefaultPackageFinder;
@@ -106,6 +104,7 @@ fn main() {
     progress::increment_completed(ProgressType::Setup, 1);
 
     if let Some(command) = args.command {
+        debug!("Generating actions for command {command:?}");
         let result: Result<Vec<action::Action>, String> = match command {
             CommandType::Install {
                 from_file,
@@ -151,14 +150,15 @@ fn main() {
         };
 
         match result {
+            // TODO: make a pretty actions display screen
             Ok(actions) => {
                 if let Err(error) = build_actions(actions.clone(), args.build_threads.unwrap_or(3))
                 {
-                    error!("Error whire building actions: {error}");
+                    error!("Error while building actions: {error}");
                     exit(-1);
                 }
                 if let Err(error) = commit_actions(actions, &mut db) {
-                    error!("Error whire building actions: {error}");
+                    error!("Error while commiting actions: {error}");
                     exit(-1);
                 }
             }
@@ -170,79 +170,6 @@ fn main() {
     }
 
     exit(0);
-}
-
-fn build_actions(actions: Vec<Action>, threads: usize) -> Result<(), action::BuildError> {
-    let thread_pool = ThreadPool::new(threads);
-
-    if actions.is_empty() {
-        progress::set_comleted(progress::ProgressType::ActionsBuild);
-    } else {
-        progress::increment_target(ProgressType::ActionsBuild, actions.len() as i32);
-    }
-
-    let build_error: Arc<Mutex<Option<BuildError>>> = Arc::new(Mutex::new(None));
-
-    for mut action in actions {
-        let build_error = build_error.clone();
-        thread_pool.execute(move || {
-            if build_error
-                .lock()
-                .expect("Could not lock shared thread error")
-                .is_some()
-            {
-                return;
-            }
-
-            trace!("Commiting action {action}");
-            if let Err(error) = action.build("/var/lib/japm/install_pkgs") {
-                let mut build_error = build_error
-                    .lock()
-                    .expect("Could not lock shared thread error");
-
-                *build_error = Some(error);
-            }
-
-            progress::increment_completed(ProgressType::ActionsBuild, 1);
-            frontends::display_action(&action);
-        });
-    }
-
-    thread_pool.join();
-
-    let build_error = build_error
-        .lock()
-        .expect("Could not lock shared thread error")
-        .take();
-
-    if let Some(error) = build_error {
-        Err(error)
-    } else {
-        Ok(())
-    }
-}
-
-fn commit_actions<DB, EDatabaseAdd, EDatabaseRemove>(
-    actions: Vec<Action>,
-    db: &mut DB,
-) -> Result<(), action::CommitError<EDatabaseAdd, EDatabaseRemove>>
-where
-    EDatabaseAdd: Display,
-    EDatabaseRemove: Display,
-    DB: PackagesDb<AddError = EDatabaseAdd, RemoveError = EDatabaseRemove>,
-{
-    if actions.is_empty() {
-        progress::set_comleted(progress::ProgressType::ActionsCommit);
-    } else {
-        progress::increment_target(ProgressType::ActionsCommit, actions.len() as i32);
-    }
-
-    for action in actions {
-        action.commit(db)?;
-        progress::increment_completed(ProgressType::ActionsCommit, 1);
-    }
-
-    Ok(())
 }
 
 fn get_config() -> Config {
@@ -297,6 +224,79 @@ fn get_db() -> SqlitePackagesDb {
             exit(-1);
         }
     }
+}
+
+fn build_actions(actions: Vec<Action>, threads: usize) -> Result<(), action::BuildError> {
+    let thread_pool = ThreadPool::new(threads);
+    debug!("Building actions with {threads} threads");
+
+    if actions.is_empty() {
+        progress::set_comleted(progress::ProgressType::ActionsBuild);
+    } else {
+        progress::increment_target(ProgressType::ActionsBuild, actions.len() as i32);
+    }
+
+    let build_error: Arc<Mutex<Option<BuildError>>> = Arc::new(Mutex::new(None));
+
+    for mut action in actions {
+        let build_error = build_error.clone();
+        thread_pool.execute(move || {
+            if build_error
+                .lock()
+                .expect("Could not lock shared thread error")
+                .is_some()
+            {
+                return;
+            }
+
+            if let Err(error) = action.build("/var/lib/japm/install_pkgs") {
+                let mut build_error = build_error
+                    .lock()
+                    .expect("Could not lock shared thread error");
+
+                *build_error = Some(error);
+            }
+
+            progress::increment_completed(ProgressType::ActionsBuild, 1);
+            frontends::display_action(&action);
+        });
+    }
+
+    thread_pool.join();
+
+    let build_error = build_error
+        .lock()
+        .expect("Could not lock shared thread error")
+        .take();
+
+    if let Some(error) = build_error {
+        Err(error)
+    } else {
+        Ok(())
+    }
+}
+
+fn commit_actions<DB, EDatabaseAdd, EDatabaseRemove>(
+    actions: Vec<Action>,
+    db: &mut DB,
+) -> Result<(), action::CommitError<EDatabaseAdd, EDatabaseRemove>>
+where
+    EDatabaseAdd: Display,
+    EDatabaseRemove: Display,
+    DB: PackagesDb<AddError = EDatabaseAdd, RemoveError = EDatabaseRemove>,
+{
+    if actions.is_empty() {
+        progress::set_comleted(progress::ProgressType::ActionsCommit);
+    } else {
+        progress::increment_target(ProgressType::ActionsCommit, actions.len() as i32);
+    }
+
+    for action in actions {
+        action.commit(db)?;
+        progress::increment_completed(ProgressType::ActionsCommit, 1);
+    }
+
+    Ok(())
 }
 
 fn exit(code: i32) -> ! {
