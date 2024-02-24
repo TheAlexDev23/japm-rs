@@ -39,16 +39,11 @@ impl PackageFinder for DefaultPackageFinder {
     type Error = PackageFindError;
     fn find_package(&mut self, package_name: &str) -> Result<Option<RemotePackage>, Self::Error> {
         if self.from_file {
-            let mut path: String = String::from(package_name);
-            if !path.ends_with(".json") {
-                path.push_str(".json");
-            }
-
-            if fs::metadata(&path).is_err() {
+            if fs::metadata(package_name).is_err() {
                 return Ok(None);
             }
 
-            let json_content = fs::read_to_string(path)?;
+            let json_content = fs::read_to_string(package_name)?;
             Ok(Some(RemotePackage::from_json(&json_content)?))
         } else if let Some(remote_package) =
             self.remote_search_cache.get(&String::from(package_name))
