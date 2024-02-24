@@ -10,19 +10,19 @@ use log::{debug, error, info};
 use action::Action;
 use config::Config;
 use db::{PackagesDb, SqlitePackagesDb};
-use default_package_finder::DefaultPackageFinder;
 use frontends::{StdFrontend, TuiFrontend};
 use logger::FrontendLogger;
+use package_finder::DefaultPackageFinder;
 use progress::{FrontendProgress, ProgressType};
 
 mod action;
 mod commands;
 mod config;
 mod db;
-mod default_package_finder;
 mod frontends;
 mod logger;
 mod package;
+mod package_finder;
 mod progress;
 
 #[cfg(test)]

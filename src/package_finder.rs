@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::io;
 use std::path::Path;
 
@@ -10,9 +11,16 @@ use reqwest::StatusCode;
 
 use thiserror::Error;
 
-use crate::commands::PackageFinder;
 use crate::config::Config;
 use crate::package::RemotePackage;
+
+pub trait PackageFinder {
+    type Error: Display;
+    async fn find_package(
+        &mut self,
+        package_name: &str,
+    ) -> Result<Option<RemotePackage>, Self::Error>;
+}
 
 #[derive(Error, Debug)]
 pub enum PackageFindError {

@@ -10,6 +10,7 @@ use semver::Version;
 use crate::action::Action;
 use crate::db::PackagesDb;
 use crate::package::{LocalPackage, RemotePackage};
+use crate::package_finder::PackageFinder;
 use crate::progress::{self, ProgressType};
 
 pub use errors::*;
@@ -21,14 +22,6 @@ type LinkedHashSet<T> = LinkedHashMap<T, ()>;
 pub mod errors;
 #[cfg(test)]
 mod tests;
-
-pub trait PackageFinder {
-    type Error: Display;
-    async fn find_package(
-        &mut self,
-        package_name: &str,
-    ) -> Result<Option<RemotePackage>, Self::Error>;
-}
 
 pub enum ReinstallOptions {
     Update,
