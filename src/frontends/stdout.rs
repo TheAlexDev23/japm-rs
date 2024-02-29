@@ -1,17 +1,30 @@
 use std::io;
 
+use tokio::select;
+
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
-use super::{Frontend, MessageColor};
+use crate::frontends::messaging::UIReadHandle;
 
-pub struct StdFrontend {
+use super::MessageColor;
+
+struct StdHandle {
+    messaging_handle: UIReadHandle,
+
     terminal_width: u16,
     progressbar: ProgressBar,
 }
 
-impl StdFrontend {
-    pub fn new() -> Result<StdFrontend, io::Error> {
+pub fn init(read_handle: UIReadHandle) -> Result<(), io::Error> {
+    let mut handle = StdHandle::init(read_handle)?;
+    tokio::spawn(async move { handle.update_cycle().await });
+
+    Ok(())
+}
+
+impl StdHandle {
+    pub fn init(read_handle: UIReadHandle) -> Result<StdHandle, io::Error> {
         let (width, _) = crossterm::terminal::size()?;
         let progressbar = ProgressBar::new(width as u64);
         progressbar.set_style(
@@ -20,34 +33,45 @@ impl StdFrontend {
                 .progress_chars("██ "),
         );
 
-        Ok(StdFrontend {
+        Ok(StdHandle {
+            messaging_handle: read_handle,
             terminal_width: width,
             progressbar,
         })
     }
-}
 
-impl Frontend for StdFrontend {
-    fn refresh(&mut self) {}
-
-    fn display_message(&mut self, message: String, color: &super::MessageColor) {
-        match color {
-            MessageColor::White => self.progressbar.println(format!("{}", message.white())),
-            MessageColor::Cyan => self.progressbar.println(format!("{}", message.cyan())),
-            MessageColor::Green => self.progressbar.println(format!("{}", message.green())),
-            MessageColor::Yellow => self.progressbar.println(format!("{}", message.yellow())),
-            MessageColor::Purple => self.progressbar.println(format!("{}", message.purple())),
+    pub(self) async fn update_cycle(&mut self) {
+        loop {
+            if self.handle_input().await {
+                return;
+            }
         }
     }
 
-    fn display_action(&mut self, _: &crate::action::Action) {}
+    async fn handle_input(&mut self) -> bool {
+        select! {
+            Some((message, color)) = self.messaging_handle.messages.recv() => {
+                match color {
+                    MessageColor::White => self.progressbar.println(format!("{}", message.white())),
+                    MessageColor::Cyan => self.progressbar.println(format!("{}", message.cyan())),
+                    MessageColor::Green => self.progressbar.println(format!("{}", message.green())),
+                    MessageColor::Yellow => self.progressbar.println(format!("{}", message.yellow())),
+                    MessageColor::Purple => self.progressbar.println(format!("{}", message.purple())),
+                }
 
-    fn set_progressbar(&mut self, percentage: f32) {
-        self.progressbar
-            .set_position((self.terminal_width as f32 * percentage) as u64)
-    }
+                false
+            }
+            Some(percentage) = self.messaging_handle.progressbar.recv() => {
+                self.progressbar
+                    .set_position((self.terminal_width as f32 * percentage) as u64);
 
-    fn exit(&mut self) {
-        self.progressbar.finish_and_clear();
+                false
+            }
+            Some(_) = self.messaging_handle.exit.recv() => {
+                self.progressbar.finish_and_clear();
+
+                true
+            }
+        }
     }
 }

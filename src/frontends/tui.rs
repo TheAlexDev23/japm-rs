@@ -1,6 +1,9 @@
 use std::io;
 use std::io::Stderr;
 
+use clap::error::Result;
+use tokio::select;
+
 use thiserror::Error;
 
 use ratatui::{
@@ -11,9 +14,14 @@ use ratatui::{
     Frame,
 };
 
-use super::{Frontend, MessageColor};
+use crate::action::Action;
+use crate::frontends::messaging::UIReadHandle;
 
-pub struct TuiFrontend<'a> {
+use super::MessageColor;
+
+struct TuiHandle<'a> {
+    messaging_handle: UIReadHandle,
+
     messages_window: TextWindow<'a>,
     actions_window: TextWindow<'a>,
     progressbar_window: ProgressbarWindow,
@@ -40,10 +48,17 @@ pub enum InitializeError {
     Size(u16, u16, u16, u16),
 }
 
-impl<'a> TuiFrontend<'a> {
-    pub fn init() -> Result<TuiFrontend<'a>, InitializeError> {
+pub fn init(read_handle: UIReadHandle) -> Result<(), InitializeError> {
+    let mut handle = TuiHandle::init(read_handle)?;
+    tokio::spawn(async move { handle.update_cycle().await });
+
+    Ok(())
+}
+
+impl<'a> TuiHandle<'a> {
+    pub fn init(read_handle: UIReadHandle) -> Result<TuiHandle<'a>, InitializeError> {
         const PROGRESSBAR_HEIGHT: u16 = 1;
-        const ACTIONSWINDOW_SCALE: f32 = 0.2;
+        const ACTIONS_WINDOW_SCALE: f32 = 0.2;
 
         let (width, height) = crossterm::terminal::size()?;
         Self::verify_size(width, height)?;
@@ -51,7 +66,7 @@ impl<'a> TuiFrontend<'a> {
         crossterm::terminal::enable_raw_mode()?;
         crossterm::execute!(std::io::stderr(), crossterm::terminal::EnterAlternateScreen)?;
 
-        let actions_width = (width as f32 * ACTIONSWINDOW_SCALE) as u16;
+        let actions_width = (width as f32 * ACTIONS_WINDOW_SCALE) as u16;
         let messages_width = width - actions_width;
         let messages_height = height - PROGRESSBAR_HEIGHT;
 
@@ -78,7 +93,8 @@ impl<'a> TuiFrontend<'a> {
 
         let message_render_threshold = messages_rect.height;
 
-        Ok(TuiFrontend {
+        let handle = TuiHandle::<'a> {
+            messaging_handle: read_handle,
             messages_window: TextWindow {
                 title: String::from("Output"),
                 render_threshold: message_render_threshold,
@@ -96,7 +112,9 @@ impl<'a> TuiFrontend<'a> {
                 rect: progressbar_rect,
             },
             terminal: Terminal::new(CrosstermBackend::new(std::io::stderr()))?,
-        })
+        };
+
+        Ok(handle)
     }
 
     fn verify_size(width: u16, height: u16) -> Result<(), InitializeError> {
@@ -109,63 +127,73 @@ impl<'a> TuiFrontend<'a> {
             Ok(())
         }
     }
-}
 
-impl<'a> Frontend for TuiFrontend<'a> {
-    fn refresh(&mut self) {
-        self.terminal
-            .draw(|frame| {
-                self.messages_window.render(frame);
-                self.actions_window.render(frame);
+    pub(self) async fn update_cycle(&mut self) {
+        loop {
+            if self.handle_input().await {
+                return;
+            }
 
-                frame.render_widget(
-                    Gauge::default().percent((self.progressbar_window.progress * 100.0) as u16),
-                    self.progressbar_window.rect,
-                )
-            })
-            .expect("Could not draw terminal");
+            self.terminal
+                .draw(|frame| {
+                    self.messages_window.render(frame);
+                    self.actions_window.render(frame);
+
+                    frame.render_widget(
+                        Gauge::default().percent((self.progressbar_window.progress * 100.0) as u16),
+                        self.progressbar_window.rect,
+                    )
+                })
+                .expect("Could not draw terminal");
+        }
     }
 
-    fn display_message(&mut self, message: String, color: &super::MessageColor) {
-        let style = match color {
-            MessageColor::White => Style::default().white(),
-            MessageColor::Cyan => Style::default().cyan(),
-            MessageColor::Green => Style::default().green(),
-            MessageColor::Yellow => Style::default().yellow(),
-            MessageColor::Purple => Style::default().magenta(),
-        };
+    async fn handle_input(&mut self) -> bool {
+        select! {
+            Some((message, color)) = self.messaging_handle.messages.recv() => {
+                let style = match color {
+                    MessageColor::White => Style::default().white(),
+                    MessageColor::Cyan => Style::default().cyan(),
+                    MessageColor::Green => Style::default().green(),
+                    MessageColor::Yellow => Style::default().yellow(),
+                    MessageColor::Purple => Style::default().magenta(),
+                };
 
-        self.messages_window
-            .buffer
-            .lines
-            .push(Line::styled(message, style));
+                self.messages_window
+                    .buffer
+                    .lines
+                    .push(Line::styled(message, style));
 
-        self.refresh()
-    }
+                false
+            }
+            Some(action) = self.messaging_handle.actions.recv() => {
+                let style = match action {
+                    Action::Remove(_) => Style::default().red(),
+                    Action::Install(_) => Style::default().green(),
+                };
 
-    fn display_action(&mut self, action: &crate::action::Action) {
-        let style = match action {
-            crate::action::Action::Remove(_) => Style::default().red(),
-            crate::action::Action::Install(_) => Style::default().green(),
-        };
+                self.actions_window
+                    .buffer
+                    .lines
+                    .push(Line::styled(format!("{action}"), style));
 
-        self.actions_window
-            .buffer
-            .lines
-            .push(Line::styled(format!("{action}"), style));
+                false
+            }
+            Some(percentage) = self.messaging_handle.progressbar.recv() => {
+                self.progressbar_window.progress = percentage;
 
-        self.refresh();
-    }
+                false
+            }
+            Some(_) = self.messaging_handle.exit.recv() => {
+                crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen)
+                    .expect("Could not leave alternate screen");
+                crossterm::terminal::disable_raw_mode().expect("Could not disable raw mode");
 
-    fn set_progressbar(&mut self, percentage: f32) {
-        self.progressbar_window.progress = percentage;
-        self.refresh();
-    }
+                self.messaging_handle.exit_finish.lock().await.send(()).expect("Could not send exit finish response to frontend caller");
 
-    fn exit(&mut self) {
-        crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen)
-            .expect("Could not leave alternate screen");
-        crossterm::terminal::disable_raw_mode().expect("Could not disable raw mode");
+                true
+            }
+        }
     }
 }
 

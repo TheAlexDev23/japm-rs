@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tokio::join;
 
 use clap::{ArgAction, Parser, Subcommand};
@@ -10,7 +10,6 @@ use log::{debug, error, info};
 use action::Action;
 use config::Config;
 use db::{PackagesDb, SqlitePackagesDb};
-use frontends::{StdFrontend, TuiFrontend};
 use logger::FrontendLogger;
 use package_finder::DefaultPackageFinder;
 use progress::{FrontendProgress, ProgressType};
@@ -70,22 +69,24 @@ static mut GATHER_KEY_BEFORE_EXIT: bool = false;
 async fn main() {
     let args = Args::parse();
 
-    if args.no_tui {
-        frontends::set_boxed_frontend(Box::new(
-            StdFrontend::new().expect("Could not initialize std frontend."),
-        ))
-    } else {
-        frontends::set_boxed_frontend(Box::new(
-            TuiFrontend::init().expect("Could not initialize TUI frontend"),
-        ));
-        unsafe {
-            GATHER_KEY_BEFORE_EXIT = true;
+    {
+        let (write_handle, read_handle) = frontends::messaging::generate_message_pair();
+        frontends::set_ui_messenger(write_handle);
+        if args.no_tui {
+            frontends::stdout::init(read_handle).expect("Could not initialize STD frontend.");
+        } else {
+            frontends::tui::init(read_handle).expect("Could not initialize TUI frontend.");
+            unsafe {
+                GATHER_KEY_BEFORE_EXIT = true;
+            }
         }
     }
 
     progress::set_boxed_progress(Box::new(FrontendProgress::new()));
 
-    match log::set_boxed_logger(Box::new(FrontendLogger)) {
+    match log::set_boxed_logger(Box::new(
+        FrontendLogger::new().expect("Could not initialize frontend logger."),
+    )) {
         Ok(()) => log::set_max_level(if args.verbose {
             log::LevelFilter::Trace
         } else {
@@ -150,104 +151,104 @@ async fn main() {
         match result {
             // TODO: make a pretty actions display screen
             Ok(actions) => {
-                if let Err(error) = build_actions(actions.clone()) {
+                if let Err(error) = build_actions(actions.clone()).await {
                     error!("Error while building actions: {error}");
-                    exit(-1);
+                    exit(-1).await
                 }
-                if let Err(error) = commit_actions(actions, &mut db) {
+                if let Err(error) = commit_actions(actions, &mut db).await {
                     error!("Error while commiting actions: {error}");
-                    exit(-1);
+                    exit(-1).await
                 }
             }
             Err(error_message) => {
                 error!("Error while performing command:\n{error_message}");
-                exit(-1);
+                exit(-1).await
             }
         }
     }
 
-    exit(0);
+    exit(0).await
 }
 
 async fn get_config() -> Config {
     const CONFIG_PATH: &str = "/etc/japm/config.json";
 
-    progress::increment_target(ProgressType::Setup, 1);
+    progress::increment_target(ProgressType::Setup, 1).await;
 
     match Config::create_default_config_if_necessary(CONFIG_PATH).await {
         Ok(created) => {
             if created {
                 if let Err(error) = Config::write_default_config(CONFIG_PATH).await {
                     error!("Could not write default config: {error}");
-                    exit(-1);
+                    exit(-1).await
                 }
             }
         }
         Err(error) => {
             error!("Could not create default config if necessary: {error}");
-            exit(-1);
+            exit(-1).await
         }
     }
 
     match Config::from_file(CONFIG_PATH).await {
         Ok(config) => {
-            progress::increment_completed(ProgressType::Setup, 1);
+            progress::increment_completed(ProgressType::Setup, 1).await;
             config
         }
         Err(error) => {
             error!("Could not get config: {error}");
-            exit(-1);
+            exit(-1).await
         }
     }
 }
 
 async fn get_db() -> SqlitePackagesDb {
-    progress::increment_target(ProgressType::Setup, 1);
+    progress::increment_target(ProgressType::Setup, 1).await;
     match SqlitePackagesDb::create_db_file_if_necessary().await {
         Ok(created) => {
             let mut db = match SqlitePackagesDb::new() {
                 Ok(db) => db,
                 Err(error) => {
                     error!("Could not connect to the database: {error}");
-                    exit(-1);
+                    exit(-1).await
                 }
             };
 
             if created {
                 if let Err(error) = db.initialize_database() {
                     error!("Could not initialize database: {error}");
-                    exit(-1);
+                    exit(-1).await
                 }
             }
 
-            progress::increment_completed(ProgressType::Setup, 1);
+            progress::increment_completed(ProgressType::Setup, 1).await;
             db
         }
         Err(error) => {
             error!("Could not create db file if necessary: {error}");
-            exit(-1);
+            exit(-1).await
         }
     }
 }
 
-fn build_actions(mut actions: Vec<Action>) -> Result<(), action::BuildError> {
+async fn build_actions(actions: Vec<Action>) -> Result<(), action::BuildError> {
     if actions.is_empty() {
-        progress::set_comleted(progress::ProgressType::ActionsBuild);
+        progress::set_comleted(progress::ProgressType::ActionsBuild).await;
     } else {
-        progress::increment_target(ProgressType::ActionsBuild, actions.len() as i32);
+        progress::increment_target(ProgressType::ActionsBuild, actions.len() as i32).await;
     }
 
-    actions
-        .par_iter_mut()
-        .try_for_each(|action| -> Result<(), action::BuildError> {
-            action.build("/var/lib/japm/install_pkgs")?;
-            progress::increment_completed(ProgressType::ActionsBuild, 1);
-            frontends::display_action(action);
-            Ok(())
-        })
+    let rt = tokio::runtime::Handle::current();
+    actions.into_par_iter().try_for_each(|mut action| {
+        action.build("/var/lib/japm/install_pkgs/")?;
+        rt.spawn(async move {
+            frontends::display_action(&action).await;
+        });
+        Ok(())
+    })
 }
 
-fn commit_actions<DB, EDatabaseAdd, EDatabaseRemove>(
+async fn commit_actions<DB, EDatabaseAdd, EDatabaseRemove>(
     actions: Vec<Action>,
     db: &mut DB,
 ) -> Result<(), action::CommitError<EDatabaseAdd, EDatabaseRemove>>
@@ -257,26 +258,30 @@ where
     DB: PackagesDb<AddError = EDatabaseAdd, RemoveError = EDatabaseRemove>,
 {
     if actions.is_empty() {
-        progress::set_comleted(progress::ProgressType::ActionsCommit);
+        progress::set_comleted(progress::ProgressType::ActionsCommit).await;
     } else {
-        progress::increment_target(ProgressType::ActionsCommit, actions.len() as i32);
+        progress::increment_target(ProgressType::ActionsCommit, actions.len() as i32).await;
     }
 
     for action in actions {
         action.commit(db)?;
-        progress::increment_completed(ProgressType::ActionsCommit, 1);
+        progress::increment_completed(ProgressType::ActionsCommit, 1).await;
     }
 
     Ok(())
 }
 
-fn exit(code: i32) -> ! {
+async fn exit(code: i32) -> ! {
+    // Due to the async nature of the logging/frontend implementation, we need to make sure all
+    // needed messages have logged before showing the "press any key to exit" screen
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
     if unsafe { GATHER_KEY_BEFORE_EXIT } {
         info!("Press any key to exit");
         crossterm::event::read().expect("Could not read input");
     }
 
-    frontends::exit();
+    frontends::exit().await;
 
     std::process::exit(code);
 }

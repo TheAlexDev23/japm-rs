@@ -37,12 +37,12 @@ pub async fn install_packages<EFind: Display, EDatabase: Display>(
 ) -> Result<Vec<Action>, InstallError<EDatabase, EFind>> {
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
 
-    progress::increment_target(ProgressType::Packages, packages.len() as i32);
+    progress::increment_target(ProgressType::Packages, packages.len() as i32).await;
 
     for package_name in packages.iter() {
         actions.extend(install_package(package_name, package_finder, reinstall_options, db).await?);
 
-        progress::increment_completed(ProgressType::Packages, 1);
+        progress::increment_completed(ProgressType::Packages, 1).await;
     }
 
     Ok(actions.keys().cloned().collect())
@@ -55,11 +55,11 @@ pub async fn remove_packages<EDatabase: Display>(
 ) -> Result<Vec<Action>, RemoveError<EDatabase>> {
     let mut actions: LinkedHashSet<Action> = LinkedHashSet::new();
 
-    progress::increment_target(ProgressType::Packages, package_names.len() as i32);
+    progress::increment_target(ProgressType::Packages, package_names.len() as i32).await;
 
     for package_name in package_names.into_iter() {
-        actions.extend(remove_package(&package_name, recursive, db)?);
-        progress::increment_completed(ProgressType::Packages, 1);
+        actions.extend(remove_package(&package_name, recursive, db).await?);
+        progress::increment_completed(ProgressType::Packages, 1).await;
     }
 
     Ok(actions.keys().cloned().collect())
@@ -204,12 +204,13 @@ async fn install_package<EFind: Display, EDatabase: Display>(
     progress::increment_target(
         ProgressType::Packages,
         remote_package.dependencies.len() as i32,
-    );
+    )
+    .await;
 
     for dependency in remote_package.dependencies.iter() {
         actions.extend(install_package(dependency, package_finder, reinstall_options, db).await?);
 
-        progress::increment_completed(ProgressType::Packages, 1);
+        progress::increment_completed(ProgressType::Packages, 1).await;
     }
 
     actions.insert(Action::Install(remote_package), ());
@@ -217,7 +218,8 @@ async fn install_package<EFind: Display, EDatabase: Display>(
     Ok(actions)
 }
 
-fn remove_package<EDatabase: Display>(
+#[async_recursion(?Send)]
+async fn remove_package<EDatabase: Display>(
     package_name: &str,
     recursive: bool,
     db: &mut impl PackagesDb<GetError = EDatabase>,
@@ -246,16 +248,13 @@ fn remove_package<EDatabase: Display>(
     if !depending_packages.is_empty() {
         if recursive {
             info!("Found depending packages, uninstalling...");
-            progress::increment_target(ProgressType::Packages, depending_packages.len() as i32);
+            progress::increment_target(ProgressType::Packages, depending_packages.len() as i32)
+                .await;
 
             for dependency in depending_packages.iter() {
-                actions.extend(remove_package(
-                    &dependency.package_data.name,
-                    recursive,
-                    db,
-                )?);
+                actions.extend(remove_package(&dependency.package_data.name, recursive, db).await?);
 
-                progress::increment_completed(ProgressType::Packages, 1);
+                progress::increment_completed(ProgressType::Packages, 1).await;
             }
         } else {
             let depending_packages: Vec<String> = depending_packages

@@ -1,4 +1,4 @@
-use std::sync::{Mutex, MutexGuard};
+use tokio::sync::{Mutex, MutexGuard};
 
 use crate::frontends;
 
@@ -9,11 +9,13 @@ pub enum ProgressType {
     ActionsBuild,
     ActionsCommit,
 }
-pub trait Progress {
-    fn increment_target(&mut self, progress_type: ProgressType, amount: i32);
-    fn increment_completed(&mut self, progress_type: ProgressType, amount: i32);
 
-    fn set_comleted(&mut self, progress_type: ProgressType);
+#[async_trait::async_trait]
+pub trait Progress {
+    async fn increment_target(&mut self, progress_type: ProgressType, amount: i32);
+    async fn increment_completed(&mut self, progress_type: ProgressType, amount: i32);
+
+    async fn set_comleted(&mut self, progress_type: ProgressType);
 }
 
 pub struct FrontendProgress {
@@ -38,14 +40,14 @@ impl FrontendProgress {
         }
     }
 
-    pub fn refresh(&self) {
+    pub async fn refresh(&self) {
         let multiplier = 1.0 / 4.0;
         let progress: f32 = self.setup.get_progress() * multiplier
             + self.packages.get_progress() * multiplier
             + self.actions_build.get_progress() * multiplier
             + self.actions_commit.get_progress() * multiplier;
 
-        frontends::set_progressbar(progress);
+        frontends::set_progressbar(progress).await;
     }
 
     fn progress_group(&mut self, progress_type: ProgressType) -> &mut ProgressGroup {
@@ -58,20 +60,21 @@ impl FrontendProgress {
     }
 }
 
+#[async_trait::async_trait]
 impl Progress for FrontendProgress {
-    fn increment_target(&mut self, progress_type: ProgressType, amount: i32) {
+    async fn increment_target(&mut self, progress_type: ProgressType, amount: i32) {
         self.progress_group(progress_type).target += amount;
-        self.refresh();
+        self.refresh().await;
     }
-    fn increment_completed(&mut self, progress_type: ProgressType, amount: i32) {
+    async fn increment_completed(&mut self, progress_type: ProgressType, amount: i32) {
         self.progress_group(progress_type).completed += amount;
-        self.refresh();
+        self.refresh().await;
     }
-    fn set_comleted(&mut self, progress_type: ProgressType) {
+    async fn set_comleted(&mut self, progress_type: ProgressType) {
         let progress_group = self.progress_group(progress_type);
         progress_group.completed = 1;
         progress_group.target = 1;
-        self.refresh();
+        self.refresh().await;
     }
 }
 
@@ -100,23 +103,25 @@ pub fn set_boxed_progress(progress: Box<dyn Progress>) {
     }
 }
 
-pub fn increment_target(progress_type: ProgressType, amount: i32) {
-    get_progress().increment_target(progress_type, amount)
+pub async fn increment_target(progress_type: ProgressType, amount: i32) {
+    get_progress()
+        .await
+        .increment_target(progress_type, amount)
+        .await;
 }
-pub fn increment_completed(progress_type: ProgressType, amount: i32) {
-    get_progress().increment_completed(progress_type, amount)
+pub async fn increment_completed(progress_type: ProgressType, amount: i32) {
+    get_progress()
+        .await
+        .increment_completed(progress_type, amount)
+        .await;
 }
-pub fn set_comleted(progress_type: ProgressType) {
-    get_progress().set_comleted(progress_type)
+pub async fn set_comleted(progress_type: ProgressType) {
+    get_progress().await.set_comleted(progress_type).await;
 }
 
-fn get_progress<'a>() -> MutexGuard<'a, Box<dyn Progress>> {
+async fn get_progress<'a>() -> MutexGuard<'a, Box<dyn Progress>> {
     unsafe {
         #[allow(clippy::mut_mutex_lock)]
-        CURRENT_PROGRESS
-            .as_mut()
-            .unwrap()
-            .lock()
-            .expect("Could not lock progress")
+        CURRENT_PROGRESS.as_mut().unwrap().lock().await
     }
 }

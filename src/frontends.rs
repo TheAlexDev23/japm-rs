@@ -1,13 +1,14 @@
-use std::sync::{Mutex, MutexGuard};
+use std::sync::Arc;
 
 use crate::action::Action;
 
-pub use stdout::StdFrontend;
-pub use tui::TuiFrontend;
+use messaging::UIWriteHandle;
 
-mod stdout;
-mod tui;
+pub mod messaging;
+pub mod stdout;
+pub mod tui;
 
+#[derive(Clone)]
 pub enum MessageColor {
     White,
     Cyan,
@@ -16,44 +17,33 @@ pub enum MessageColor {
     Purple,
 }
 
-static mut CURRENT_FRONTEND: Option<Mutex<Box<dyn Frontend>>> = None;
+static mut UI_MESSENGER: Option<Arc<UIWriteHandle>> = None;
 
-pub trait Frontend {
-    fn refresh(&mut self);
-    fn display_message(&mut self, message: String, color: &MessageColor);
-    fn display_action(&mut self, action: &Action);
-    fn set_progressbar(&mut self, percentage: f32);
-    fn exit(&mut self);
-}
-
-pub fn set_boxed_frontend(frontend: Box<dyn Frontend>) {
+pub fn set_ui_messenger(messenger: UIWriteHandle) {
     unsafe {
-        CURRENT_FRONTEND = Some(Mutex::new(frontend));
+        UI_MESSENGER = Some(Arc::new(messenger));
     }
 }
 
-pub fn display_message(message: String, color: &MessageColor) {
-    get_frontend().display_message(message, color);
+pub async fn display_message(message: String, color: &MessageColor) -> Option<()> {
+    get_messenger()?.display_message(message, color).await;
+    Some(())
 }
-pub fn display_action(action: &Action) {
-    get_frontend().display_action(action);
+pub async fn display_action(action: &Action) -> Option<()> {
+    get_messenger()?.display_action(action).await;
+    Some(())
 }
-pub fn set_progressbar(percentage: f32) {
-    get_frontend().set_progressbar(percentage);
+pub async fn set_progressbar(percentage: f32) -> Option<()> {
+    get_messenger()?.set_progressbar(percentage).await;
+    Some(())
 }
-pub fn exit() {
-    get_frontend().exit();
+pub async fn exit() -> Option<()> {
+    let messenger = get_messenger()?;
+    messenger.exit().await;
+    messenger.exit_finish.lock().await.recv().await;
+    Some(())
 }
 
-fn get_frontend<'a>() -> MutexGuard<'a, Box<dyn Frontend>> {
-    unsafe {
-        // Need to lock instead of get_mut because otherwise weird graphic fuckery happens that I don't really
-        // understand
-        #[allow(clippy::mut_mutex_lock)]
-        CURRENT_FRONTEND
-            .as_mut()
-            .unwrap()
-            .lock()
-            .expect("Could not lock frontend instance.")
-    }
+fn get_messenger<'a>() -> Option<&'a UIWriteHandle> {
+    unsafe { UI_MESSENGER.as_deref() }
 }

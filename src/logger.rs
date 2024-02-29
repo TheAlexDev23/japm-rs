@@ -1,11 +1,22 @@
+use std::io;
+
 use log::{Level, Log};
 
 use crate::frontends::{self, MessageColor};
 
 const LINE_START: &str = "==>";
 
-#[derive(Default)]
-pub struct FrontendLogger;
+pub struct FrontendLogger {
+    rt: tokio::runtime::Runtime,
+}
+
+impl FrontendLogger {
+    pub fn new() -> Result<FrontendLogger, io::Error> {
+        Ok(FrontendLogger {
+            rt: tokio::runtime::Runtime::new()?,
+        })
+    }
+}
 
 impl Log for FrontendLogger {
     fn log(&self, record: &log::Record) {
@@ -20,13 +31,15 @@ impl Log for FrontendLogger {
             Level::Error => MessageColor::Purple,
         };
 
-        let mut message = message.split('\n').map(String::from);
-        frontends::display_message(message.next().unwrap(), &color);
+        self.rt.spawn(async move {
+            let mut message = message.split('\n').map(String::from);
+            frontends::display_message(message.next().unwrap(), &color).await;
 
-        for mut line in message {
-            line.insert_str(0, "    ");
-            frontends::display_message(line, &color);
-        }
+            for mut line in message {
+                line.insert_str(0, "    ");
+                frontends::display_message(line, &color).await;
+            }
+        });
     }
 
     fn enabled(&self, _: &log::Metadata) -> bool {
