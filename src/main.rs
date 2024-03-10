@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::fmt::Display;
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -101,7 +102,7 @@ async fn main() {
 
     if let Some(command) = args.command {
         debug!("Generating actions for command {command:?}");
-        let result: Result<Vec<action::Action>, String> = match command {
+        let result: Result<Vec<action::Action>, Box<dyn Error>> = match command {
             CommandType::Install {
                 from_file,
                 reinstall,
@@ -122,14 +123,14 @@ async fn main() {
                     &mut db,
                 )
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(Box::from)
             }
             CommandType::Remove {
                 packages,
                 recursive,
             } => commands::remove_packages(packages, recursive, &mut db)
                 .await
-                .map_err(|e| e.to_string()),
+                .map_err(Box::from),
             CommandType::Update { system, packages } => {
                 let mut package_finder = DefaultPackageFinder::new(false, &config);
                 if system {
@@ -138,12 +139,11 @@ async fn main() {
                     commands::update_packages(packages, &mut package_finder, &mut db).await
                 }
             }
-            .map_err(|e| e.to_string()),
+            .map_err(Box::from),
             CommandType::Info { packages } => {
-                if let Err(error) = commands::print_package_info(packages, &mut db) {
-                    Err(error.to_string())
-                } else {
-                    Ok(vec![])
+                match commands::print_package_info(packages, &mut db) {
+                    Err(error) => Err(Box::from(error)),
+                    Ok(()) => Ok(vec![]),
                 }
             }
         };
@@ -160,8 +160,8 @@ async fn main() {
                     exit(-1).await
                 }
             }
-            Err(error_message) => {
-                error!("Error while performing command:\n{error_message}");
+            Err(error) => {
+                error!("Error while performing command:\n{error}");
                 exit(-1).await
             }
         }

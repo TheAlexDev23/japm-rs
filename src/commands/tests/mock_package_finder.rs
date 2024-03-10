@@ -1,17 +1,20 @@
 use std::collections::HashMap;
 
-use crate::package::{PackageData, RemotePackage};
-
 use crate::commands::PackageFinder;
+use crate::package::{PackageData, RemotePackage};
+use crate::test_helpers::errors::StringError;
 
 pub struct MockPackageFinder {
     packages_db: HashMap<String, RemotePackage>,
 }
 
 impl PackageFinder for MockPackageFinder {
-    type Error = String;
+    type Error = StringError;
 
-    async fn find_package(&mut self, package_name: &str) -> Result<Option<RemotePackage>, String> {
+    async fn find_package(
+        &mut self,
+        package_name: &str,
+    ) -> Result<Option<RemotePackage>, Self::Error> {
         Ok(self.packages_db.get(&String::from(package_name)).cloned())
     }
 }

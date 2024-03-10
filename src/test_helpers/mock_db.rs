@@ -1,3 +1,4 @@
+use super::errors::StringError;
 use crate::db::PackagesDb;
 use crate::package::{LocalPackage, RemotePackage};
 
@@ -14,11 +15,11 @@ impl MockPackagesDb {
 }
 
 impl PackagesDb for MockPackagesDb {
-    type AddError = String;
-    type RemoveError = String;
-    type GetError = String;
+    type AddError = StringError;
+    type RemoveError = StringError;
+    type GetError = StringError;
 
-    fn add_package(&mut self, package: &RemotePackage) -> Result<(), String> {
+    fn add_package(&mut self, package: &RemotePackage) -> Result<(), Self::AddError> {
         let local_packge = LocalPackage {
             package_data: package.package_data.clone(),
             pre_remove: package.pre_remove.clone(),
@@ -32,7 +33,7 @@ impl PackagesDb for MockPackagesDb {
         Ok(())
     }
 
-    fn remove_package(&mut self, package_name: &str) -> Result<(), String> {
+    fn remove_package(&mut self, package_name: &str) -> Result<(), Self::RemoveError> {
         let index = self
             .installed_packges
             .iter()
@@ -42,11 +43,11 @@ impl PackagesDb for MockPackagesDb {
             self.installed_packges.remove(index);
             Ok(())
         } else {
-            Err(String::from("Package not found"))
+            Err("Package not found".into())
         }
     }
 
-    fn get_package(&mut self, package_name: &str) -> Result<Option<LocalPackage>, String> {
+    fn get_package(&mut self, package_name: &str) -> Result<Option<LocalPackage>, Self::GetError> {
         let package = self
             .installed_packges
             .iter()
@@ -59,11 +60,14 @@ impl PackagesDb for MockPackagesDb {
         }
     }
 
-    fn get_all_packages(&mut self) -> Result<Vec<LocalPackage>, String> {
+    fn get_all_packages(&mut self) -> Result<Vec<LocalPackage>, Self::GetError> {
         Ok(self.installed_packges.clone())
     }
 
-    fn get_depending_packages(&mut self, package_name: &str) -> Result<Vec<LocalPackage>, String> {
+    fn get_depending_packages(
+        &mut self,
+        package_name: &str,
+    ) -> Result<Vec<LocalPackage>, Self::GetError> {
         let all_packages = self.get_all_packages()?;
         let mut depending_packages: Vec<LocalPackage> = Vec::new();
 

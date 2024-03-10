@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::error::Error;
 
 use async_recursion::async_recursion;
 
@@ -29,7 +29,7 @@ pub enum ReinstallOptions {
     Ignore,
 }
 
-pub async fn install_packages<EFind: Display, EDatabase: Display>(
+pub async fn install_packages<EFind: Error, EDatabase: Error>(
     packages: Vec<String>,
     package_finder: &mut impl PackageFinder<Error = EFind>,
     reinstall_options: &ReinstallOptions,
@@ -48,7 +48,7 @@ pub async fn install_packages<EFind: Display, EDatabase: Display>(
     Ok(actions.keys().cloned().collect())
 }
 
-pub async fn remove_packages<EDatabase: Display>(
+pub async fn remove_packages<EDatabase: Error>(
     package_names: Vec<String>,
     recursive: bool,
     db: &mut impl PackagesDb<GetError = EDatabase>,
@@ -65,7 +65,7 @@ pub async fn remove_packages<EDatabase: Display>(
     Ok(actions.keys().cloned().collect())
 }
 
-pub async fn update_all_packages<EDatabase: Display, EFind: Display>(
+pub async fn update_all_packages<EDatabase: Error, EFind: Error>(
     package_finder: &mut impl PackageFinder<Error = EFind>,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<Vec<Action>, UpdateError<EDatabase, EFind>> {
@@ -81,7 +81,7 @@ pub async fn update_all_packages<EDatabase: Display, EFind: Display>(
     Ok(actions)
 }
 
-pub async fn update_packages<EDatabase: Display, EFind: Display>(
+pub async fn update_packages<EDatabase: Error, EFind: Error>(
     package_names: Vec<String>,
     package_finder: &mut impl PackageFinder<Error = EFind>,
     db: &mut impl PackagesDb<GetError = EDatabase>,
@@ -112,7 +112,7 @@ pub async fn update_packages<EDatabase: Display, EFind: Display>(
     Ok(actions)
 }
 
-pub fn print_package_info<EDatabase: Display>(
+pub fn print_package_info<EDatabase: Error>(
     package_names: Vec<String>,
     db: &mut impl PackagesDb<GetError = EDatabase>,
 ) -> Result<(), InfoError<EDatabase>> {
@@ -137,7 +137,7 @@ pub fn print_package_info<EDatabase: Display>(
 }
 
 #[async_recursion(?Send)]
-async fn install_package<EFind: Display, EDatabase: Display>(
+async fn install_package<EFind: Error, EDatabase: Error>(
     package_name: &str,
     package_finder: &mut impl PackageFinder<Error = EFind>,
     reinstall_options: &ReinstallOptions,
@@ -219,7 +219,7 @@ async fn install_package<EFind: Display, EDatabase: Display>(
 }
 
 #[async_recursion(?Send)]
-async fn remove_package<EDatabase: Display>(
+async fn remove_package<EDatabase: Error>(
     package_name: &str,
     recursive: bool,
     db: &mut impl PackagesDb<GetError = EDatabase>,
@@ -285,7 +285,7 @@ fn remote_is_newer(
     Ok(remote_version > local_version)
 }
 
-fn get_depending<EDatabase: Display>(
+fn get_depending<EDatabase: Error>(
     package_name: &str,
     db: &mut impl PackagesDb<GetError = EDatabase>,
     max_level: i32,
@@ -295,7 +295,7 @@ fn get_depending<EDatabase: Display>(
         .cloned()
         .collect())
 }
-fn get_depending_recursive<EDatabase: Display>(
+fn get_depending_recursive<EDatabase: Error>(
     package_name: &str,
     db: &mut impl PackagesDb<GetError = EDatabase>,
     level: i32,
